@@ -129,18 +129,34 @@ export default function FileUploads({
         <FileInput
           leftSection={<IconUpload />}
           size="lg"
-          placeholder="IFR Extractor output TXT"
+          placeholder="IFR Extractor output TXT(s)"
           accept=".txt"
-          value={files.setupTxtContainer.file}
+          multiple
+          value={
+            files.setupTxtContainer.file
+              ? [files.setupTxtContainer.file]
+              : []
+          }
           error={files.setupTxtContainer.isWrongFile}
-          onChange={(file) => {
-            if (file) {
-              const name = file.name.toLowerCase();
+          onChange={(selectedFiles) => {
+            if (selectedFiles.length !== 0) {
+              const sortedFiles = [...selectedFiles].sort((a, b) =>
+                a.name.localeCompare(b.name, undefined, { numeric: true }),
+              );
+              const isWrongFile = sortedFiles.some((file) => {
+                const name = file.name.toLowerCase();
+                return !(name.includes("ifr") && name.endsWith(".txt"));
+              });
+              const combinedFile = new File(
+                sortedFiles.flatMap((file) => [file, "\n"]),
+                `combined-${String(sortedFiles.length)}-ifr-outputs.txt`,
+                { type: "text/plain" },
+              );
 
               setFiles((draft) => {
                 draft.setupTxtContainer = {
-                  file,
-                  isWrongFile: !(name.includes("ifr") && name.endsWith(".txt")),
+                  file: combinedFile,
+                  isWrongFile,
                 };
               });
             }
