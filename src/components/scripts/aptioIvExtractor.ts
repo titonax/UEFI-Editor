@@ -58,12 +58,15 @@ function guid(bytes: Uint8Array, offset: number) {
   ).join("")}`;
 }
 
-async function lzmaDecompress(input: Uint8Array) {
+async function firmwareDecompress(
+  input: Uint8Array,
+  mode: "lzma" | "standard",
+) {
   const directory = new Map<string, WasiFile>();
-  directory.set("input.lzma", new WasiFile(input));
+  directory.set("input.bin", new WasiFile(input));
   const messages: string[] = [];
   const wasi = new WASI(
-    ["lzma-decompress", "input.lzma", "output.bin"],
+    ["firmware-decompress", "input.bin", "output.bin", mode],
     [],
     [
       new OpenFile(new WasiFile([])),
@@ -72,9 +75,13 @@ async function lzmaDecompress(input: Uint8Array) {
       new PreopenDirectory(".", directory),
     ],
   );
-  const response = await fetch(`${import.meta.env.BASE_URL}lzma-decompress.wasm`);
+  const response = await fetch(
+    `${import.meta.env.BASE_URL}firmware-decompress.wasm`,
+  );
   if (!response.ok) {
-    throw new Error(`LZMA WebAssembly could not be loaded (${String(response.status)}).`);
+    throw new Error(
+      `Firmware decompressor WebAssembly could not be loaded (${String(response.status)}).`,
+    );
   }
   const module = await WebAssembly.compileStreaming(response);
   const instance = await WebAssembly.instantiate(module, {
@@ -87,7 +94,9 @@ async function lzmaDecompress(input: Uint8Array) {
   );
   const output = directory.get("output.bin");
   if (exitCode !== 0 || !output) {
-    throw new Error(messages.join("\n") || `LZMA exited with ${String(exitCode)}.`);
+    throw new Error(
+      messages.join("\n") || `Firmware decompressor exited with ${String(exitCode)}.`,
+    );
   }
   return output.data;
 }
@@ -158,7 +167,12 @@ async function nestedBuffers(bytes: Uint8Array) {
           const compressionType = bytes[section + 8];
           const body = bytes.slice(section + 9, section + sectionSize);
           if (compressionType === 0) nested.push(body);
-          if (compressionType === 2) nested.push(await lzmaDecompress(body));
+          if (compressionType === 1) {
+            nested.push(await firmwareDecompress(body, "standard"));
+          }
+          if (compressionType === 2) {
+            nested.push(await firmwareDecompress(body, "lzma"));
+          }
         }
         section = align(section + sectionSize, 4);
       }
@@ -180,16 +194,24 @@ async function locateSetup(bytes: Uint8Array) {
   throw new Error("Setup FFS was not found after recursive decompression.");
 }
 
-function locateHii(file: LocatedFile): Uint8Array | null {
+async function locateHii(file: LocatedFile): Promise<Uint8Array | null> {
   let section = file.bodyStart;
   while (section + 4 <= file.end) {
     const size = u24(file.bytes, section);
     const type = file.bytes[section + 3];
     if (size < 4 || section + size > file.end) break;
-    if (type === 0x01 && size >= 9 && file.bytes[section + 8] === 0) {
-      const nested = file.bytes.slice(section + 9, section + size);
+    if (type === 0x01 && size >= 9) {
+      const compressionType = file.bytes[section + 8];
+      const body = file.bytes.slice(section + 9, section + size);
+      const nested =
+        compressionType === 0
+          ? body
+          : await firmwareDecompress(
+              body,
+              compressionType === 2 ? "lzma" : "standard",
+            );
       const nestedFile = { bytes: nested, bodyStart: 0, end: nested.length, depth: file.depth };
-      const result: Uint8Array | null = locateHii(nestedFile);
+      const result = await locateHii(nestedFile);
       if (result) return result;
     }
     if (type === 0x18 && size >= 20 && guid(file.bytes, section + 4) === hiiGuid) {
@@ -231,7 +253,7 @@ async function runIfrExtractor(hii: Uint8Array) {
 export async function extractAptioIvArtifacts(file: File): Promise<AptioIvArtifacts> {
   const image = new Uint8Array(await file.arrayBuffer());
   const setup = await locateSetup(image);
-  const hii = locateHii(setup);
+  const hii = await locateHii(setup);
   if (!hii) throw new Error("The Setup HII package was not found.");
   const ifrText = await runIfrExtractor(hii);
   const formPackageCount = (ifrText.match(/FormSet Guid:/g) ?? []).length;
