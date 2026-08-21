@@ -2,10 +2,25 @@
 
 This branch is the development area for adding AMI Aptio IV support to UEFI Editor.
 
+## Product target
+
+The primary workflow is a single complete Aptio IV `.bin` or `.rom` image:
+
+1. Detect the flash layout, firmware volumes, Setup, AMITSE and SetupData.
+2. Extract and parse all HII/IFR form sets in the browser.
+3. Classify items as visible, suppressed/hidden, access-level hidden, or runtime conditional.
+4. Show the condition tree separately from claims about the physical hardware.
+5. Allow only unambiguous visibility changes.
+6. Rebuild the affected section, FFS and firmware volume with corrected sizes and checksums.
+7. Verify all untouched regions byte-for-byte and download a flash-ready image plus a change log.
+
+The four-file input remains available as an expert diagnostic mode.
+
 ## Current status
 
 - The inherited Aptio V behavior is unchanged.
-- Aptio IV support is not implemented or claimed yet.
+- Full-image structural detection and extracted-file parsing are implemented experimentally.
+- Full-image decompression, reconstruction and export are not implemented yet.
 - Parser and patching changes will be based on reproducible firmware samples.
 - Modified output must never be flashed before independent validation and a recovery path are available.
 
