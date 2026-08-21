@@ -58,15 +58,34 @@ function guid(bytes: Uint8Array, offset: number) {
   ).join("")}`;
 }
 
-async function firmwareDecompress(
+const decompressorModules = new Map<string, Promise<WebAssembly.Module>>();
+
+function loadDecompressor(name: string) {
+  let pending = decompressorModules.get(name);
+  if (!pending) {
+    pending = fetch(`${import.meta.env.BASE_URL}${name}`).then((response) => {
+      if (!response.ok) {
+        throw new Error(
+          `Firmware decompressor WebAssembly could not be loaded (${String(response.status)}).`,
+        );
+      }
+      return WebAssembly.compileStreaming(response);
+    });
+    decompressorModules.set(name, pending);
+  }
+  return pending;
+}
+
+async function runFirmwareDecompress(
   input: Uint8Array,
-  mode: "lzma" | "standard",
+  wasmName: string,
+  mode: "lzma" | "tiano" | "efi",
 ) {
   const directory = new Map<string, WasiFile>();
   directory.set("input.bin", new WasiFile(input));
   const messages: string[] = [];
   const wasi = new WASI(
-    ["firmware-decompress", "input.bin", "output.bin", mode],
+    [wasmName, "input.bin", "output.bin", mode],
     [],
     [
       new OpenFile(new WasiFile([])),
@@ -75,15 +94,7 @@ async function firmwareDecompress(
       new PreopenDirectory(".", directory),
     ],
   );
-  const response = await fetch(
-    `${import.meta.env.BASE_URL}firmware-decompress.wasm`,
-  );
-  if (!response.ok) {
-    throw new Error(
-      `Firmware decompressor WebAssembly could not be loaded (${String(response.status)}).`,
-    );
-  }
-  const module = await WebAssembly.compileStreaming(response);
+  const module = await loadDecompressor(wasmName);
   const instance = await WebAssembly.instantiate(module, {
     wasi_snapshot_preview1: wasi.wasiImport,
   });
@@ -99,6 +110,31 @@ async function firmwareDecompress(
     );
   }
   return output.data;
+}
+
+async function firmwareDecompress(
+  input: Uint8Array,
+  mode: "lzma" | "standard",
+) {
+  if (mode === "lzma") {
+    return runFirmwareDecompress(input, "firmware-decompress.wasm", "lzma");
+  }
+
+  const failures: string[] = [];
+  for (const algorithm of ["tiano", "efi"] as const) {
+    try {
+      return await runFirmwareDecompress(
+        input,
+        "tiano-decompress.wasm",
+        algorithm,
+      );
+    } catch (error) {
+      failures.push(
+        `${algorithm}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  throw new Error(`EFI/Tiano decompression failed (${failures.join("; ")}).`);
 }
 
 function validVolume(bytes: Uint8Array, start: number) {

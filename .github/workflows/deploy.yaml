@@ -30,6 +30,10 @@ jobs:
         with:
           node-version: 20
           cache: "npm"
+      - name: Set up WASI SDK
+        uses: bytecodealliance/setup-wasi-sdk-action@v1
+        with:
+          version: "25"
       - name: Install dependencies
         run: npm ci
       - name: Build IFRExtractor WebAssembly
@@ -47,6 +51,9 @@ jobs:
         run: |
           cargo build --manifest-path tools/lzma-wasi/Cargo.toml --release --target wasm32-wasip1
           cp tools/lzma-wasi/target/wasm32-wasip1/release/firmware-decompress.wasm public/firmware-decompress.wasm
+          $CC -O3 -DNDEBUG -Wl,--strip-all -Itools/tiano-wasi \
+            tools/tiano-wasi/main.c tools/tiano-wasi/Decompress.c \
+            -o public/tiano-decompress.wasm
       - name: Build
         run: npm run build
       - name: Setup Pages
