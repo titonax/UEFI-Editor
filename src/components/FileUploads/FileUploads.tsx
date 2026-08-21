@@ -106,8 +106,8 @@ export default function FileUploads({
         <FileInput
           leftSection={<IconUpload />}
           size="lg"
-          placeholder="Setup SCT"
-          accept=".sct"
+          placeholder="Setup HII / SCT"
+          accept=".sct,.bin"
           value={files.setupSctContainer.file}
           error={files.setupSctContainer.isWrongFile}
           onChange={(file) => {
@@ -118,7 +118,8 @@ export default function FileUploads({
                 draft.setupSctContainer = {
                   file,
                   isWrongFile: !(
-                    name.includes("setup") && name.endsWith(".sct")
+                    (name.includes("setup") && name.endsWith(".sct")) ||
+                    name.endsWith(".bin")
                   ),
                 };
               });
@@ -166,8 +167,8 @@ export default function FileUploads({
         <FileInput
           leftSection={<IconUpload />}
           size="lg"
-          placeholder="AMITSE SCT"
-          accept=".sct"
+          placeholder="AMITSE PE32 / SCT"
+          accept=".sct,.bin"
           value={files.amitseSctContainer.file}
           error={files.amitseSctContainer.isWrongFile}
           onChange={(file) => {
@@ -178,7 +179,8 @@ export default function FileUploads({
                 draft.amitseSctContainer = {
                   file,
                   isWrongFile: !(
-                    name.includes("amitse") && name.endsWith(".sct")
+                    (name.includes("amitse") && name.endsWith(".sct")) ||
+                    name.endsWith(".bin")
                   ),
                 };
               });
