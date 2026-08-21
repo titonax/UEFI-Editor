@@ -1,10 +1,10 @@
 [package]
-name = "lzma-decompress"
+name = "firmware-decompress"
 version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-lzma-rs = "0.3.0"
+efi-compress = "0.2.0"
 
 [profile.release]
 opt-level = 3
