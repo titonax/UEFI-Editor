@@ -1,4 +1,4 @@
-import lzmaWorkerUrl from "lzma/src/lzma_worker-min.js?url";
+@@ -0,0 +1,239 @@
 import {
   ConsoleStdout,
   File as WasiFile,
@@ -60,53 +60,37 @@ function guid(bytes: Uint8Array, offset: number) {
 }
 
 async function lzmaDecompress(input: Uint8Array) {
-  const workerResponse = await fetch(lzmaWorkerUrl);
-  if (!workerResponse.ok) {
-    throw new Error(`LZMA worker could not be loaded (${String(workerResponse.status)}).`);
+  const directory = new Map<string, WasiFile>();
+  directory.set("input.lzma", new WasiFile(input));
+  const messages: string[] = [];
+  const wasi = new WASI(
+    ["lzma-decompress", "input.lzma", "output.bin"],
+    [],
+    [
+      new OpenFile(new WasiFile([])),
+      ConsoleStdout.lineBuffered((line) => messages.push(line)),
+      ConsoleStdout.lineBuffered((line) => messages.push(line)),
+      new PreopenDirectory(".", directory),
+    ],
+  );
+  const response = await fetch(`${import.meta.env.BASE_URL}lzma-decompress.wasm`);
+  if (!response.ok) {
+    throw new Error(`LZMA WebAssembly could not be loaded (${String(response.status)}).`);
   }
-  const workerSource = await workerResponse.text();
-  return new Promise<Uint8Array>((resolve, reject) => {
-    const transferBridge = `
-      const nativePostMessage = self.postMessage.bind(self);
-      self.postMessage = (message) => {
-        if (message && message.action === 2 && Array.isArray(message.result)) {
-          const result = Uint8Array.from(message.result);
-          message.result = result;
-          nativePostMessage(message, [result.buffer]);
-          return;
-        }
-        nativePostMessage(message);
-      };
-    `;
-    const workerUrl = URL.createObjectURL(
-      new Blob([workerSource, "\n", transferBridge], { type: "text/javascript" }),
-    );
-    const worker = new Worker(workerUrl);
-    worker.onerror = (event) => {
-      worker.terminate();
-      URL.revokeObjectURL(workerUrl);
-      reject(new Error(event.message || "LZMA worker failed."));
-    };
-    worker.onmessage = (event: MessageEvent<{ action: number; result: Uint8Array | null; error?: unknown }>) => {
-      if (event.data.action !== 2) return;
-      worker.terminate();
-      URL.revokeObjectURL(workerUrl);
-      if (event.data.error || event.data.result === null) {
-        const message =
-          event.data.error instanceof Error
-            ? event.data.error.message
-            : "LZMA decompression failed.";
-        reject(new Error(message));
-      } else {
-        resolve(event.data.result);
-      }
-    };
-    const transferable = input.slice();
-    worker.postMessage(
-      { action: 2, data: transferable, cbn: 1 },
-      [transferable.buffer],
-    );
+  const module = await WebAssembly.compileStreaming(response);
+  const instance = await WebAssembly.instantiate(module, {
+    wasi_snapshot_preview1: wasi.wasiImport,
   });
+  const exitCode = wasi.start(
+    instance as WebAssembly.Instance & {
+      exports: { memory: WebAssembly.Memory; _start: () => unknown };
+    },
+  );
+  const output = directory.get("output.bin");
+  if (exitCode !== 0 || !output) {
+    throw new Error(messages.join("\n") || `LZMA exited with ${String(exitCode)}.`);
+  }
+  return output.data;
 }
 
 function validVolume(bytes: Uint8Array, start: number) {
