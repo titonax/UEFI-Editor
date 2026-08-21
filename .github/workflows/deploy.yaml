@@ -43,7 +43,7 @@ jobs:
           git clone --quiet https://github.com/LongSoft/IFRExtractor-RS.git /tmp/ifrextractor-rs
           git -C /tmp/ifrextractor-rs checkout --quiet b1b9b36c00e3209ff0b1d2a76f10cb17e339473d
           sed -i 's/sha256 = "1.6.0"/sha2 = "0.10.9"/' /tmp/ifrextractor-rs/Cargo.toml
-          sed -i '/extern crate sha256;/d; s/use sha256::digest;/use sha2::{Digest, Sha256};/' /tmp/ifrextractor-rs/src/main.rs
+          sed -i 's/extern crate sha256;/extern crate sha2;/; s/use sha256::digest;/use sha2::{Digest, Sha256};/' /tmp/ifrextractor-rs/src/main.rs
           sed -i 's/digest(data)/format!("{:x}", Sha256::digest(data))/g' /tmp/ifrextractor-rs/src/main.rs
           cargo build --manifest-path /tmp/ifrextractor-rs/Cargo.toml --release --target wasm32-wasip1
           cp /tmp/ifrextractor-rs/target/wasm32-wasip1/release/ifrextractor.wasm public/ifrextractor.wasm
