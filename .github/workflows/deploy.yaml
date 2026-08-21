@@ -47,10 +47,10 @@ jobs:
           sed -i 's/digest(data)/format!("{:x}", Sha256::digest(data))/g' /tmp/ifrextractor-rs/src/main.rs
           cargo build --manifest-path /tmp/ifrextractor-rs/Cargo.toml --release --target wasm32-wasip1
           cp /tmp/ifrextractor-rs/target/wasm32-wasip1/release/ifrextractor.wasm public/ifrextractor.wasm
-      - name: Build LZMA WebAssembly
+      - name: Build firmware decompression WebAssembly
         run: |
           cargo build --manifest-path tools/lzma-wasi/Cargo.toml --release --target wasm32-wasip1
-          cp tools/lzma-wasi/target/wasm32-wasip1/release/lzma-decompress.wasm public/lzma-decompress.wasm
+          cp tools/lzma-wasi/target/wasm32-wasip1/release/firmware-decompress.wasm public/firmware-decompress.wasm
       - name: Build
         run: npm run build
       - name: Setup Pages
