@@ -326,7 +326,9 @@ export default function FormUi({
         </Table.Thead>
         <Table.Tbody>
           {data.menu.map((entry, index) => (
-            <Table.Tr key={index.toString() + entry.offset + entry.formId}>
+            <Table.Tr
+              key={index.toString() + (entry.offset ?? "readonly") + entry.formId}
+            >
               <Table.Td
                 className={s.pointer}
                 onClick={() => {
@@ -338,6 +340,7 @@ export default function FormUi({
               <Table.Td className={s.formIdWidth}>
                 <NativeSelect
                   className={s.formIdChildWidth}
+                  disabled={entry.offset === null}
                   value={entry.formId}
                   data={data.forms.map((form) => form.formId)}
                   onChange={(ev) => {
