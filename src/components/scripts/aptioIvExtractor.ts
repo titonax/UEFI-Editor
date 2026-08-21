@@ -59,10 +59,14 @@ function guid(bytes: Uint8Array, offset: number) {
   ).join("")}`;
 }
 
-function lzmaDecompress(input: Uint8Array) {
+async function lzmaDecompress(input: Uint8Array) {
+  const workerResponse = await fetch(lzmaWorkerUrl);
+  if (!workerResponse.ok) {
+    throw new Error(`LZMA worker could not be loaded (${String(workerResponse.status)}).`);
+  }
+  const workerSource = await workerResponse.text();
   return new Promise<Uint8Array>((resolve, reject) => {
-    const bootstrap = `
-      importScripts(${JSON.stringify(lzmaWorkerUrl)});
+    const transferBridge = `
       const nativePostMessage = self.postMessage.bind(self);
       self.postMessage = (message) => {
         if (message && message.action === 2 && Array.isArray(message.result)) {
@@ -74,19 +78,19 @@ function lzmaDecompress(input: Uint8Array) {
         nativePostMessage(message);
       };
     `;
-    const bootstrapUrl = URL.createObjectURL(
-      new Blob([bootstrap], { type: "text/javascript" }),
+    const workerUrl = URL.createObjectURL(
+      new Blob([workerSource, "\n", transferBridge], { type: "text/javascript" }),
     );
-    const worker = new Worker(bootstrapUrl);
+    const worker = new Worker(workerUrl);
     worker.onerror = (event) => {
       worker.terminate();
-      URL.revokeObjectURL(bootstrapUrl);
+      URL.revokeObjectURL(workerUrl);
       reject(new Error(event.message || "LZMA worker failed."));
     };
     worker.onmessage = (event: MessageEvent<{ action: number; result: Uint8Array | null; error?: unknown }>) => {
       if (event.data.action !== 2) return;
       worker.terminate();
-      URL.revokeObjectURL(bootstrapUrl);
+      URL.revokeObjectURL(workerUrl);
       if (event.data.error || event.data.result === null) {
         const message =
           event.data.error instanceof Error
