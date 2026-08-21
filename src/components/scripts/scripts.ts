@@ -17,7 +17,7 @@ import type {
   VarStores,
 } from "./types";
 
-export const version = "0.1.0";
+export const version = "0.2.0";
 const wantedIFRExtractorVersions = ["1.6.1"];
 
 async function sha256Hex(data: BufferSource) {
@@ -54,7 +54,7 @@ export async function calculateJsonChecksum(
   let offsetChecksum = "";
 
   for (const menuItem of menu) {
-    offsetChecksum += menuItem.offset;
+    offsetChecksum += menuItem.offset ?? "";
   }
 
   for (const form of forms) {
@@ -243,6 +243,10 @@ export async function downloadModifiedFiles(data: Data, files: PopulatedFiles) {
   let amitseSctChangeLog = "";
 
   for (const entry of data.menu) {
+    if (entry.offset === null) {
+      continue;
+    }
+
     const padded = entry.formId.split("x")[1].padStart(4, "0");
     const newValue = padded.slice(2) + padded.slice(0, 2);
     const index = offsetToIndex(entry.offset);
@@ -461,7 +465,9 @@ export async function parseData(files: PopulatedFiles) {
 
   setupTxt = setupTxt.replace(/[\r\n|\n|\r](?!0x[0-9A-F]{3})/g, "<br>");
 
-  let formSetId = "";
+  const formSetIds = new Set<string>();
+  const formSetRoots: Menu = [];
+  let pendingFormSetTitle: string | null = null;
   const varStores: VarStores = [];
   const forms: Forms = [];
   const suppressions: Suppression[] = [];
@@ -479,7 +485,10 @@ export async function parseData(files: PopulatedFiles) {
   const setupTxtArray = setupTxt.split("\n");
 
   for (const [index, line] of setupTxtArray.entries()) {
-    const formSet = /FormSet Guid: (.*)-(.*)-(.*)-(.*)-(.*), Title:/.exec(line);
+    const formSet =
+      /FormSet Guid: (.*)-(.*)-(.*)-(.*)-(.*), Title: "(.*)", Help:/.exec(
+        line,
+      );
     const varStore =
       /VarStore Guid: (.*), VarStoreId: (.*), Size: (.*), Name: "(.*)" \{/.exec(
         line,
@@ -514,7 +523,8 @@ export async function parseData(files: PopulatedFiles) {
     const currentScope = scopes[scopes.length - 1];
 
     if (formSet) {
-      formSetId = formSet[4] + formSet[5];
+      formSetIds.add(formSet[4] + formSet[5]);
+      pendingFormSetTitle = formSet[6];
     }
 
     if (varStore) {
@@ -526,6 +536,15 @@ export async function parseData(files: PopulatedFiles) {
     }
 
     if (form) {
+      if (pendingFormSetTitle !== null) {
+        formSetRoots.push({
+          name: pendingFormSetTitle,
+          formId: form[1],
+          offset: null,
+        });
+        pendingFormSetTitle = null;
+      }
+
       currentForm = {
         name: form[2],
         type: "Form",
@@ -771,11 +790,13 @@ export async function parseData(files: PopulatedFiles) {
     return {} as Data;
   }
 
-  const matches = [
-    ...amitseSct.matchAll(new RegExp(formSetId + "(.{4})", "g")),
-  ];
-  const menu: Menu = matches
-    .map((match) => {
+  const matches = [...formSetIds].flatMap((formSetId) =>
+    [...amitseSct.matchAll(new RegExp(formSetId + "(.{4})", "g"))].map(
+      (match) => ({ match, formSetId }),
+    ),
+  );
+  const discoveredMenu: Menu = matches
+    .map(({ match, formSetId }) => {
       const hexEntry = decToHexString(
         parseInt(match[1].slice(2) + match[1].slice(0, 2), 16),
       );
@@ -788,6 +809,7 @@ export async function parseData(files: PopulatedFiles) {
       };
     })
     .filter((x) => x.name);
+  const menu = discoveredMenu.length === 0 ? formSetRoots : discoveredMenu;
 
   for (const form of forms) {
     if (form.formId in references) {
@@ -796,6 +818,9 @@ export async function parseData(files: PopulatedFiles) {
   }
 
   const dataJson: Data = {
+    firmwareFamily: setupdataBin.startsWith("24535046")
+      ? "aptio-iv"
+      : "aptio-v",
     menu,
     forms,
     varStores,

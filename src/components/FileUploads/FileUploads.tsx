@@ -106,8 +106,8 @@ export default function FileUploads({
         <FileInput
           leftSection={<IconUpload />}
           size="lg"
-          placeholder="Setup SCT"
-          accept=".sct"
+          placeholder="Setup HII / SCT"
+          accept=".sct,.bin"
           value={files.setupSctContainer.file}
           error={files.setupSctContainer.isWrongFile}
           onChange={(file) => {
@@ -118,7 +118,8 @@ export default function FileUploads({
                 draft.setupSctContainer = {
                   file,
                   isWrongFile: !(
-                    name.includes("setup") && name.endsWith(".sct")
+                    (name.includes("setup") && name.endsWith(".sct")) ||
+                    name.endsWith(".bin")
                   ),
                 };
               });
@@ -129,18 +130,34 @@ export default function FileUploads({
         <FileInput
           leftSection={<IconUpload />}
           size="lg"
-          placeholder="IFR Extractor output TXT"
+          placeholder="IFR Extractor output TXT(s)"
           accept=".txt"
-          value={files.setupTxtContainer.file}
+          multiple
+          value={
+            files.setupTxtContainer.file
+              ? [files.setupTxtContainer.file]
+              : []
+          }
           error={files.setupTxtContainer.isWrongFile}
-          onChange={(file) => {
-            if (file) {
-              const name = file.name.toLowerCase();
+          onChange={(selectedFiles) => {
+            if (selectedFiles.length !== 0) {
+              const sortedFiles = [...selectedFiles].sort((a, b) =>
+                a.name.localeCompare(b.name, undefined, { numeric: true }),
+              );
+              const isWrongFile = sortedFiles.some((file) => {
+                const name = file.name.toLowerCase();
+                return !(name.includes("ifr") && name.endsWith(".txt"));
+              });
+              const combinedFile = new File(
+                sortedFiles.flatMap((file) => [file, "\n"]),
+                `combined-${String(sortedFiles.length)}-ifr-outputs.txt`,
+                { type: "text/plain" },
+              );
 
               setFiles((draft) => {
                 draft.setupTxtContainer = {
-                  file,
-                  isWrongFile: !(name.includes("ifr") && name.endsWith(".txt")),
+                  file: combinedFile,
+                  isWrongFile,
                 };
               });
             }
@@ -150,8 +167,8 @@ export default function FileUploads({
         <FileInput
           leftSection={<IconUpload />}
           size="lg"
-          placeholder="AMITSE SCT"
-          accept=".sct"
+          placeholder="AMITSE PE32 / SCT"
+          accept=".sct,.bin"
           value={files.amitseSctContainer.file}
           error={files.amitseSctContainer.isWrongFile}
           onChange={(file) => {
@@ -162,7 +179,8 @@ export default function FileUploads({
                 draft.amitseSctContainer = {
                   file,
                   isWrongFile: !(
-                    name.includes("amitse") && name.endsWith(".sct")
+                    (name.includes("amitse") && name.endsWith(".sct")) ||
+                    name.endsWith(".bin")
                   ),
                 };
               });

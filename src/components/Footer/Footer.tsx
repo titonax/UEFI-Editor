@@ -96,6 +96,12 @@ export default function Footer({
             size="xs"
             variant="default"
             leftSection={<IconDownload />}
+            disabled={data.firmwareFamily === "aptio-iv"}
+            title={
+              data.firmwareFamily === "aptio-iv"
+                ? "Aptio IV export is disabled until safe reinsertion is implemented"
+                : undefined
+            }
             onClick={() => {
               void downloadModifiedFiles(data, files);
             }}
