@@ -461,7 +461,7 @@ export async function parseData(files: PopulatedFiles) {
 
   setupTxt = setupTxt.replace(/[\r\n|\n|\r](?!0x[0-9A-F]{3})/g, "<br>");
 
-  let formSetId = "";
+  const formSetIds = new Set<string>();
   const varStores: VarStores = [];
   const forms: Forms = [];
   const suppressions: Suppression[] = [];
@@ -514,7 +514,7 @@ export async function parseData(files: PopulatedFiles) {
     const currentScope = scopes[scopes.length - 1];
 
     if (formSet) {
-      formSetId = formSet[4] + formSet[5];
+      formSetIds.add(formSet[4] + formSet[5]);
     }
 
     if (varStore) {
@@ -771,11 +771,13 @@ export async function parseData(files: PopulatedFiles) {
     return {} as Data;
   }
 
-  const matches = [
-    ...amitseSct.matchAll(new RegExp(formSetId + "(.{4})", "g")),
-  ];
+  const matches = [...formSetIds].flatMap((formSetId) =>
+    [...amitseSct.matchAll(new RegExp(formSetId + "(.{4})", "g"))].map(
+      (match) => ({ match, formSetId }),
+    ),
+  );
   const menu: Menu = matches
-    .map((match) => {
+    .map(({ match, formSetId }) => {
       const hexEntry = decToHexString(
         parseInt(match[1].slice(2) + match[1].slice(0, 2), 16),
       );
