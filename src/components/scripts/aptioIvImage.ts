@@ -13,7 +13,6 @@ const amitseFfsGuid = "DF0ADAB1774F7040A88EBFFE1C60529A";
 const firmwareVolumeSignature = "5F465648";
 const intelDescriptorSignature = "5AA5F00F";
 const amitseSetupName = "414D495453455365747570";
-const hpSecureSignature = "5345435552455F48505F5349474E4154555245";
 
 function bytesToHex(bytes: Uint8Array) {
   return Array.from(bytes, (byte) =>
@@ -81,8 +80,7 @@ export async function inspectAptioIvImage(
     .filter((offset) => isValidFirmwareVolume(bytes, offset));
   const setupFfs = findAll(hex, setupFfsGuid, 8);
   const amitseFfs = findAll(hex, amitseFfsGuid, 8);
-  const hasAmiNvramMarkers =
-    hex.includes(amitseSetupName) && hex.includes(hpSecureSignature);
+  const hasAmiNvramMarkers = hex.includes(amitseSetupName);
   const nestedFirmwareCandidate =
     firmwareVolumes.length !== 0 &&
     setupFfs.length === 0 &&
@@ -100,10 +98,8 @@ export async function inspectAptioIvImage(
     amitseFfs,
     nestedFirmwareCandidate,
     aptioIvCandidate:
-      (firmwareVolumes.length !== 0 &&
-        setupFfs.length !== 0 &&
-        amitseFfs.length !== 0) ||
-      nestedFirmwareCandidate,
+      firmwareVolumes.length !== 0 &&
+      (setupFfs.length !== 0 || hasAmiNvramMarkers),
   };
 }
 

@@ -106,8 +106,8 @@ export default function BiosImageUpload({ onExtracted }: BiosImageUploadProps) {
           <Alert color={report.aptioIvCandidate ? "green" : "yellow"}>
             {report.aptioIvCandidate
               ? report.nestedFirmwareCandidate
-                ? "AMI Aptio IV candidate: Setup and AMITSE are inside a compressed nested volume. Recursive extraction is required."
-                : "AMI Aptio IV candidate: Setup and AMITSE were found. Full automatic extraction is the next pipeline stage."
+                ? "AMI Aptio IV candidate: Setup is inside a compressed nested volume. Recursive extraction is required."
+                : "AMI Aptio IV candidate: Setup FFS was found. Automatic IFR extraction is available."
               : "The required Aptio IV structures were not found. No changes can be generated for this image."}
           </Alert>
           <Table striped withColumnBorders>
