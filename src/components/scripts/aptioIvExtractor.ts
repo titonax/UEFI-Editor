@@ -138,7 +138,7 @@ interface LocatedFile {
 function findFile(bytes: Uint8Array, wantedGuid: string, depth: number) {
   for (const volumeStart of findVolumes(bytes)) {
     const volumeEnd = volumeStart + u64(bytes, volumeStart + 0x20);
-    let fileStart = align(volumeStart + u16(bytes, volumeStart + 0x30), 8);
+    let fileStart = volumeStart + align(u16(bytes, volumeStart + 0x30), 8);
     while (fileStart + 24 <= volumeEnd) {
       if (bytes.slice(fileStart, fileStart + 24).every((byte) => byte === 0xff)) break;
       const size = u24(bytes, fileStart + 20);
@@ -146,7 +146,7 @@ function findFile(bytes: Uint8Array, wantedGuid: string, depth: number) {
       if (guid(bytes, fileStart) === wantedGuid) {
         return { bytes, bodyStart: fileStart + 24, end: fileStart + size, depth };
       }
-      fileStart = align(fileStart + size, 8);
+      fileStart = volumeStart + align(fileStart - volumeStart + size, 8);
     }
   }
   return null;
@@ -156,7 +156,7 @@ async function nestedBuffers(bytes: Uint8Array) {
   const nested: Uint8Array[] = [];
   for (const volumeStart of findVolumes(bytes)) {
     const volumeEnd = volumeStart + u64(bytes, volumeStart + 0x20);
-    let fileStart = align(volumeStart + u16(bytes, volumeStart + 0x30), 8);
+    let fileStart = volumeStart + align(u16(bytes, volumeStart + 0x30), 8);
     while (fileStart + 24 <= volumeEnd) {
       if (bytes.slice(fileStart, fileStart + 24).every((byte) => byte === 0xff)) break;
       const size = u24(bytes, fileStart + 20);
@@ -175,7 +175,7 @@ async function nestedBuffers(bytes: Uint8Array) {
         }
         section = align(section + sectionSize, 4);
       }
-      fileStart = align(fileStart + size, 8);
+      fileStart = volumeStart + align(fileStart - volumeStart + size, 8);
     }
   }
   return nested;
