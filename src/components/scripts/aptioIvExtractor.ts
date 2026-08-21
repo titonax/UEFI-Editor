@@ -1,4 +1,3 @@
-@@ -0,0 +1,239 @@
 import {
   ConsoleStdout,
   File as WasiFile,
