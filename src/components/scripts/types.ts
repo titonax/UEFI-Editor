@@ -1,4 +1,5 @@
 export interface Data {
+  firmwareFamily: "aptio-v" | "aptio-iv";
   menu: Menu;
   varStores: VarStores;
   forms: Forms;
@@ -23,7 +24,7 @@ export interface Suppression {
 export type Menu = {
   name: string;
   formId: string;
-  offset: string;
+  offset: string | null;
 }[];
 
 export type Forms = Form[];
