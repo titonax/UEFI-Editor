@@ -48,7 +48,9 @@ export default function BiosImageUpload() {
         <>
           <Alert color={report.aptioIvCandidate ? "green" : "yellow"}>
             {report.aptioIvCandidate
-              ? "AMI Aptio IV candidate: Setup and AMITSE were found. Full automatic extraction is the next pipeline stage."
+              ? report.nestedFirmwareCandidate
+                ? "AMI Aptio IV candidate: Setup and AMITSE are inside a compressed nested volume. Recursive extraction is required."
+                : "AMI Aptio IV candidate: Setup and AMITSE were found. Full automatic extraction is the next pipeline stage."
               : "The required Aptio IV structures were not found. No changes can be generated for this image."}
           </Alert>
           <Table striped withColumnBorders>
