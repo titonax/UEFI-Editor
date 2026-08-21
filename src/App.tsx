@@ -12,6 +12,7 @@ import Navigation from "./components/Navigation/Navigation";
 import Header from "./components/Header/Header";
 import Footer from "./components/Footer/Footer";
 import { IconBrandGithub } from "@tabler/icons-react";
+import BiosImageUpload from "./components/BiosImageUpload/BiosImageUpload";
 
 export default function App() {
   const [files, setFiles] = useImmer<Files>({
@@ -62,6 +63,7 @@ export default function App() {
         </>
       ) : (
         <Stack className={s.padding} gap="xl">
+          <BiosImageUpload />
           <FileUploads files={files} setFiles={setFiles} setData={setData} />
           <Group justify="center">
             <Button
