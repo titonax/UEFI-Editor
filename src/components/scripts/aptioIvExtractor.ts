@@ -61,14 +61,32 @@ function guid(bytes: Uint8Array, offset: number) {
 
 function lzmaDecompress(input: Uint8Array) {
   return new Promise<Uint8Array>((resolve, reject) => {
-    const worker = new Worker(lzmaWorkerUrl);
+    const bootstrap = `
+      importScripts(${JSON.stringify(lzmaWorkerUrl)});
+      const nativePostMessage = self.postMessage.bind(self);
+      self.postMessage = (message) => {
+        if (message && message.action === 2 && Array.isArray(message.result)) {
+          const result = Uint8Array.from(message.result);
+          message.result = result;
+          nativePostMessage(message, [result.buffer]);
+          return;
+        }
+        nativePostMessage(message);
+      };
+    `;
+    const bootstrapUrl = URL.createObjectURL(
+      new Blob([bootstrap], { type: "text/javascript" }),
+    );
+    const worker = new Worker(bootstrapUrl);
     worker.onerror = (event) => {
       worker.terminate();
+      URL.revokeObjectURL(bootstrapUrl);
       reject(new Error(event.message || "LZMA worker failed."));
     };
-    worker.onmessage = (event: MessageEvent<{ action: number; result: number[] | null; error?: unknown }>) => {
+    worker.onmessage = (event: MessageEvent<{ action: number; result: Uint8Array | null; error?: unknown }>) => {
       if (event.data.action !== 2) return;
       worker.terminate();
+      URL.revokeObjectURL(bootstrapUrl);
       if (event.data.error || event.data.result === null) {
         const message =
           event.data.error instanceof Error
@@ -76,10 +94,14 @@ function lzmaDecompress(input: Uint8Array) {
             : "LZMA decompression failed.";
         reject(new Error(message));
       } else {
-        resolve(Uint8Array.from(event.data.result));
+        resolve(event.data.result);
       }
     };
-    worker.postMessage({ action: 2, data: Array.from(input), cbn: 1 });
+    const transferable = input.slice();
+    worker.postMessage(
+      { action: 2, data: transferable, cbn: 1 },
+      [transferable.buffer],
+    );
   });
 }
 
@@ -99,7 +121,7 @@ function validVolume(bytes: Uint8Array, start: number) {
 
 function findVolumes(bytes: Uint8Array) {
   const volumes: number[] = [];
-  for (let signature = 0x28; signature + 4 <= bytes.length; signature += 8) {
+  for (let signature = 0x28; signature + 4 <= bytes.length; signature += 4) {
     const start = signature - 0x28;
     if (validVolume(bytes, start)) volumes.push(start);
   }
