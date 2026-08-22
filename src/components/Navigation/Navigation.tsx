@@ -104,8 +104,13 @@ export default function Navigation({
       broken: s.statusBroken,
     }[node.status];
     const iconClass =
-      node.reachability === "detached" ? s.statusDetached : gateClass;
-    const semanticTitle = `${title}\n${node.reachabilityLabel}\n${node.statusLabel}${
+      node.reachability === "detached"
+        ? s.statusDetached
+        : node.status === "visible" &&
+            node.profileAssessment === "probable-fallback"
+          ? s.statusProfileFallback
+          : gateClass;
+    const semanticTitle = `${title}${node.profileLabel ? `\n${node.profileLabel}` : ""}\n${node.reachabilityLabel}\n${node.parentageLabel}\n${node.statusLabel}${
       node.conditionSummary ? `: ${node.conditionSummary}` : ""
     }`;
 
@@ -196,6 +201,7 @@ export default function Navigation({
               node.reachability === "broken") && (
               <span className={s.reachabilityLabel}>
                 {node.reachabilityLabel}
+                {node.pageMask ? ` ${node.pageMask}` : ""}
               </span>
             )}
             {(node.status === "hidden" ||
@@ -205,7 +211,13 @@ export default function Navigation({
               </span>
             )}
             {node.hardwareDependent && (
-              <span className={s.hardwareLabel}>HW/runtime</span>
+              <span className={s.hardwareLabel}>HW capability</span>
+            )}
+            {node.accessDependent && (
+              <span className={s.accessLabel}>Access policy</span>
+            )}
+            {node.uiStateDependent && (
+              <span className={s.uiStateLabel}>UI state</span>
             )}
           </button>
         </div>
@@ -288,7 +300,31 @@ export default function Navigation({
         className={s.treeScroll}
       >
         <div role="tree" aria-label="BIOS forms" className={s.tree}>
-          {tree.roots.map((node) => renderNode(node, 0))}
+          {tree.profiles.map((profile) => (
+            <React.Fragment key={profile.id}>
+              <Tooltip
+                label={profile.evidence.join(" ")}
+                multiline
+                w={440}
+              >
+                <div className={s.profileLabel}>
+                  <span>{profile.label}</span>
+                  <span
+                    className={
+                      profile.assessment === "probable-live"
+                        ? s.profileLive
+                        : profile.assessment === "probable-fallback"
+                          ? s.profileFallback
+                          : s.profileUnresolved
+                    }
+                  >
+                    {profile.confidence} confidence
+                  </span>
+                </div>
+              </Tooltip>
+              {profile.roots.map((node) => renderNode(node, 0))}
+            </React.Fragment>
+          ))}
 
           {tree.orphans.length > 0 && (
             <>
