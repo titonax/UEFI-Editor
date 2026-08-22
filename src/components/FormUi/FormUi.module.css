@@ -7,7 +7,7 @@
   text-decoration: underline dotted;
 }
 .formIdWidth {
-  width: 50%;
+  width: 14rem;
 }
 .formIdChildWidth {
   width: 7rem;
@@ -31,4 +31,31 @@
 }
 .striped > tr:nth-child(odd) {
   background-color: #25262b;
+}
+
+.conditionList {
+  min-width: 19rem;
+  max-width: 34rem;
+}
+
+.conditionCard {
+  padding: 0.4rem 0.45rem;
+  border: 1px solid var(--mantine-color-dark-4);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-dark-7);
+}
+
+.conditionExpression {
+  overflow-wrap: anywhere;
+  color: var(--mantine-color-dark-0);
+  font-family: var(--mantine-font-family-monospace);
+}
+
+.visibilitySummary {
+  position: sticky;
+  z-index: 2;
+  top: 60px;
+  padding: 0.55rem 0.75rem;
+  border-bottom: 1px solid var(--mantine-color-dark-4);
+  background: var(--mantine-color-dark-8);
 }

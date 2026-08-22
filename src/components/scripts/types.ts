@@ -19,13 +19,32 @@ export interface Suppression {
   active: boolean;
   start: string;
   end: string;
+  kind?: ConditionKind;
+  expression?: string;
+  questionIds?: string[];
+  varStoreIds?: string[];
+  varStoreNames?: string[];
+  source?: ConditionSource;
+  constant?: boolean | null;
+  formSetGuid?: string;
 }
+
+export type ConditionKind = "SuppressIf" | "GrayOutIf" | "DisableIf";
+export type ConditionSource = "setup" | "runtime" | "constant" | "unknown";
+export type VisibilityStatus =
+  | "visible"
+  | "hidden"
+  | "conditional"
+  | "unknown"
+  | "orphaned"
+  | "broken";
 
 export type Menu = {
   name: string;
   formId: string;
   offset: string | null;
   formSetGuid?: string;
+  source?: "amitse" | "formset";
 }[];
 
 export type Forms = Form[];
@@ -58,6 +77,7 @@ export interface FormChild {
   optimal: string | null;
   offsets: Offsets | null;
   suppressIf?: string[];
+  conditions?: string[];
 }
 
 export type FormChildren =
@@ -106,6 +126,7 @@ export type VarStores = {
   varStoreId: string;
   size: string;
   name: string;
+  formSetGuid?: string;
 }[];
 
 export interface Default {
@@ -114,7 +135,13 @@ export interface Default {
 }
 
 export type Scopes = {
-  type: "Form" | "Numeric" | "CheckBox" | "OneOf" | "String" | "SuppressIf";
+  type:
+    | "Form"
+    | "Numeric"
+    | "CheckBox"
+    | "OneOf"
+    | "String"
+    | ConditionKind;
   indentations: number;
   offset?: string;
 }[];
