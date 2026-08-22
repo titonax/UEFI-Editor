@@ -1,4 +1,5 @@
 import type {
+  ConditionSource,
   Data,
   FormChildren,
   Suppression,
@@ -12,6 +13,8 @@ export interface VisibilityInfo {
   explanation: string;
   conditions: Suppression[];
   hardwareDependent: boolean;
+  accessDependent: boolean;
+  uiStateDependent: boolean;
 }
 
 export type VisibilityCounts = Record<VisibilityStatus, number>;
@@ -19,8 +22,12 @@ export type VisibilityCounts = Record<VisibilityStatus, number>;
 export interface FormBranchVisibility {
   direct: VisibilityCounts;
   branch: VisibilityCounts;
+  directSources: ConditionSourceCounts;
+  branchSources: ConditionSourceCounts;
   descendantForms: number;
 }
+
+export type ConditionSourceCounts = Record<ConditionSource, number>;
 
 const labels: Record<VisibilityStatus, string> = {
   visible: "No visibility gate",
@@ -57,7 +64,13 @@ export function childVisibility(
     (condition) => (condition.kind ?? "SuppressIf") === "SuppressIf",
   );
   const hardwareDependent = effectiveConditions.some(
-    (condition) => condition.source === "runtime",
+    (condition) => condition.source === "hardware",
+  );
+  const accessDependent = effectiveConditions.some(
+    (condition) => condition.source === "access",
+  );
+  const uiStateDependent = effectiveConditions.some(
+    (condition) => condition.source === "ui",
   );
 
   if (suppressions.length > 0) {
@@ -73,6 +86,8 @@ export function childVisibility(
         : "SuppressIf is a real HII hiding gate. The item is hidden whenever the displayed expression evaluates to true; its current runtime value is not stored in the firmware image.",
       conditions,
       hardwareDependent,
+      accessDependent,
+      uiStateDependent,
     };
   }
 
@@ -90,6 +105,8 @@ export function childVisibility(
         "GrayOutIf or DisableIf keeps the item in the HII structure but makes it unavailable whenever the displayed expression evaluates to true.",
       conditions,
       hardwareDependent,
+      accessDependent,
+      uiStateDependent,
     };
   }
 
@@ -103,6 +120,8 @@ export function childVisibility(
         : `No active IFR condition is known. AMI SetupData AccessLevel is 0x${child.accessLevel}; that policy byte is reported separately and is not treated as proof of live visibility.`,
     conditions,
     hardwareDependent: false,
+    accessDependent: false,
+    uiStateDependent: false,
   };
 }
 
@@ -134,6 +153,18 @@ function emptyCounts(): VisibilityCounts {
     unknown: 0,
     orphaned: 0,
     broken: 0,
+  };
+}
+
+function emptySourceCounts(): ConditionSourceCounts {
+  return {
+    setup: 0,
+    hardware: 0,
+    access: 0,
+    ui: 0,
+    runtime: 0,
+    constant: 0,
+    unknown: 0,
   };
 }
 
@@ -169,6 +200,8 @@ export function summarizeFormBranch(
 ): FormBranchVisibility {
   const direct = emptyCounts();
   const branch = emptyCounts();
+  const directSources = emptySourceCounts();
+  const branchSources = emptySourceCounts();
   const descendantForms = new Set<number>();
 
   function visit(
@@ -183,9 +216,10 @@ export function summarizeFormBranch(
     nextAncestors.add(formIndex);
 
     for (const child of form.children) {
+      const visibility = childVisibility(data, child);
       let status = combineVisibility(
         inheritedStatus,
-        childVisibility(data, child).status,
+        visibility.status,
       );
       let targetIndex = -1;
 
@@ -201,8 +235,21 @@ export function summarizeFormBranch(
       }
 
       branch[status]++;
+      const sources = new Set(
+        visibility.conditions
+          .filter(
+            (condition) => condition.active && condition.constant !== false,
+          )
+          .map((condition) => condition.source ?? "unknown"),
+      );
+      for (const source of sources) {
+        branchSources[source]++;
+      }
       if (depth === 0) {
         direct[status]++;
+        for (const source of sources) {
+          directSources[source]++;
+        }
       }
 
       if (
@@ -222,6 +269,8 @@ export function summarizeFormBranch(
   return {
     direct,
     branch,
+    directSources,
+    branchSources,
     descendantForms: descendantForms.size,
   };
 }
