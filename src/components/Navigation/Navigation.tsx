@@ -95,6 +95,17 @@ export default function Navigation({
       node.label === node.formName
         ? `${node.formName} (${node.formId})`
         : `${node.label} — ${node.formName} (${node.formId})`;
+    const statusClass = {
+      visible: s.statusVisible,
+      hidden: s.statusHidden,
+      conditional: s.statusConditional,
+      unknown: s.statusUnknown,
+      orphaned: s.statusHidden,
+      broken: s.statusBroken,
+    }[node.status];
+    const semanticTitle = `${title}\n${node.statusLabel}${
+      node.conditionSummary ? `: ${node.conditionSummary}` : ""
+    }`;
 
     return (
       <div
@@ -112,11 +123,12 @@ export default function Navigation({
             s.treeRow,
             active ? s.selected : "",
             node.missing ? s.missing : "",
+            statusClass,
           ]
             .filter(Boolean)
             .join(" ")}
           style={{ paddingLeft: `${String(depth * 16 + 6)}px` }}
-          title={title}
+          title={semanticTitle}
         >
           <button
             type="button"
@@ -168,6 +180,7 @@ export default function Navigation({
           >
             <span className={s.nodeName}>{node.label}</span>
             <span className={s.formId}>{node.formId}</span>
+            <span className={s.statusLabel}>{node.statusLabel}</span>
           </button>
         </div>
 

@@ -1,4 +1,9 @@
-import type { Data } from "../scripts/types";
+import type { Data, VisibilityStatus } from "../scripts/types";
+import {
+  childVisibility,
+  combineVisibility,
+  visibilityLabel,
+} from "../scripts/visibility";
 
 export interface MenuTreeNode {
   key: string;
@@ -9,6 +14,9 @@ export interface MenuTreeNode {
   children: MenuTreeNode[];
   cycle?: boolean;
   missing?: boolean;
+  status: VisibilityStatus;
+  statusLabel: string;
+  conditionSummary?: string;
 }
 
 export interface MenuTree {
@@ -55,6 +63,8 @@ export function buildMenuTree(data: Data): MenuTree {
     key: string,
     label: string,
     ancestors: Set<number>,
+    inheritedStatus: VisibilityStatus,
+    conditionSummary?: string,
   ): MenuTreeNode {
     const form = data.forms[formIndex];
     const cycle = ancestors.has(formIndex);
@@ -97,15 +107,28 @@ export function buildMenuTree(data: Data): MenuTree {
                 formIndex: null,
                 children: [],
                 missing: true,
+                status: "broken",
+                statusLabel: visibilityLabel("broken"),
+                conditionSummary: "The Ref target does not exist in the parsed HII graph.",
               };
             }
 
             const target = data.forms[targetIndex];
+            const visibility = childVisibility(data, reference);
+            const status = combineVisibility(
+              inheritedStatus,
+              visibility.status,
+            );
             return buildFormNode(
               targetIndex,
               childKey,
               reference.name.length > 0 ? reference.name : target.name,
               nextAncestors,
+              status,
+              visibility.conditions
+                .map((item) => item.expression)
+                .filter((item): item is string => Boolean(item))
+                .join("; ") || visibility.explanation,
             );
           })
           .filter((node): node is MenuTreeNode => node !== null);
@@ -127,6 +150,9 @@ export function buildMenuTree(data: Data): MenuTree {
       formIndex,
       children,
       cycle,
+      status: inheritedStatus,
+      statusLabel: visibilityLabel(inheritedStatus),
+      conditionSummary,
     };
   }
 
@@ -138,10 +164,23 @@ export function buildMenuTree(data: Data): MenuTree {
         entry.formSetGuid,
       );
       if (formIndex < 0) {
-        return null;
+        return {
+          key: `root-${String(menuIndex)}-${normalizedFormId(entry.formId)}`,
+          label: entry.name || `Missing root ${entry.formId}`,
+          formName: "AMITSE root target was not found",
+          formId: entry.formId,
+          formIndex: null,
+          children: [],
+          missing: true,
+          status: "broken",
+          statusLabel: visibilityLabel("broken"),
+          conditionSummary:
+            "The menu table points to a form that does not exist in the parsed HII graph.",
+        };
       }
 
       const form = data.forms[formIndex];
+      const confirmed = entry.source === "amitse" || entry.offset !== null;
       return buildFormNode(
         formIndex,
         `root-${String(menuIndex)}-${normalizedFormId(entry.formId)}`,
@@ -149,6 +188,10 @@ export function buildMenuTree(data: Data): MenuTree {
           ? entry.name
           : (form.formSetTitle ?? form.name),
         new Set(),
+        confirmed ? "visible" : "unknown",
+        confirmed
+          ? "Confirmed in the AMITSE menu table."
+          : "FormSet root found in HII, but presence in the visible AMITSE tab list is not confirmed.",
       );
     })
     .filter((node): node is MenuTreeNode => node !== null);
@@ -162,6 +205,8 @@ export function buildMenuTree(data: Data): MenuTree {
             `root-fallback-${String(formIndex)}`,
             form.formSetTitle ?? form.name,
             new Set(),
+            "unknown",
+            "Fallback root inferred from an unreferenced FormSet.",
           ),
         );
       }
@@ -177,6 +222,8 @@ export function buildMenuTree(data: Data): MenuTree {
           `orphan-${String(formIndex)}`,
           form.name,
           new Set(),
+          "orphaned",
+          "No path from a detected menu root reaches this form.",
         ),
       );
     }

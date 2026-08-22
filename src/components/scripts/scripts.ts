@@ -2,6 +2,7 @@ import { saveAs } from "file-saver";
 import type { PopulatedFiles } from "../FileUploads/FileUploads";
 import type {
   CheckBoxPrompt,
+  ConditionKind,
   Data,
   Form,
   FormChildren,
@@ -91,13 +92,46 @@ function formReferenceKey(formId: string, formSetGuid?: string) {
   return `${formSetGuid ?? ""}:${String(parseInt(formId))}`;
 }
 
-function checkSuppressions(scopes: Scopes, formChild: FormChildren) {
-  const suppressions = scopes
-    .filter((scope) => scope.type === "SuppressIf")
+function findVarStoreName(
+  varStores: VarStores,
+  varStoreId: string,
+  formSetGuid?: string,
+) {
+  return (
+    varStores.find(
+      (varStore) =>
+        varStore.formSetGuid === formSetGuid &&
+        parseInt(varStore.varStoreId) === parseInt(varStoreId),
+    ) ??
+    varStores.find(
+      (varStore) => parseInt(varStore.varStoreId) === parseInt(varStoreId),
+    )
+  )?.name;
+}
+
+const conditionKinds = new Set<ConditionKind>([
+  "SuppressIf",
+  "GrayOutIf",
+  "DisableIf",
+]);
+
+function isConditionKind(value: Scopes[number]["type"]): value is ConditionKind {
+  return conditionKinds.has(value as ConditionKind);
+}
+
+function checkConditions(scopes: Scopes, formChild: FormChildren) {
+  const conditions = scopes
+    .filter((scope) => isConditionKind(scope.type))
     .map((scope) => scope.offset) as string[];
 
-  if (suppressions.length !== 0) {
-    formChild.suppressIf = [...suppressions];
+  if (conditions.length !== 0) {
+    formChild.conditions = [...conditions];
+    const suppressions = scopes
+      .filter((scope) => scope.type === "SuppressIf")
+      .map((scope) => scope.offset) as string[];
+    if (suppressions.length !== 0) {
+      formChild.suppressIf = suppressions;
+    }
   }
 }
 
@@ -186,6 +220,9 @@ export async function downloadModifiedFiles(data: Data, files: PopulatedFiles) {
   ) as Suppression[];
 
   for (const suppression of suppressions) {
+    if ((suppression.kind ?? "SuppressIf") !== "SuppressIf") {
+      continue;
+    }
     if (!suppression.active) {
       if (
         modifiedSetupSct.slice(
@@ -394,10 +431,91 @@ export async function downloadModifiedFiles(data: Data, files: PopulatedFiles) {
   return Promise.resolve();
 }
 
-function determineSuppressionStart(setupTxtArray: string[], index: number) {
+function readableExpressionLine(line: string) {
+  return line
+    .replace(/^0x[0-9A-F]+:\s*/i, "")
+    .replace(/\s*\{ [0-9A-F ]+ \}\s*$/i, "")
+    .trim();
+}
+
+function expressionMetadata(expression: string) {
+  return {
+    questionIds: [
+      ...expression.matchAll(
+        /\b(?:QuestionId(?:1|2)?|OtherQuestionId):\s*(0x[0-9A-F]+)/gi,
+      ),
+    ].map((match) => match[1]),
+    varStoreIds: [
+      ...expression.matchAll(/\bVarStoreId:\s*(0x[0-9A-F]+)/gi),
+    ].map((match) => match[1]),
+  };
+}
+
+function humanizeExpression(expression: string) {
+  const operators: Record<string, string> = {
+    And: "AND",
+    Or: "OR",
+    Not: "NOT",
+    Equal: "==",
+    NotEqual: "!=",
+    GreaterThan: ">",
+    GreaterEqual: ">=",
+    LessThan: "<",
+    LessEqual: "<=",
+  };
+
+  return expression
+    .split(" → ")
+    .map((part) => {
+      const eqValue =
+        /^EqIdVal\s+QuestionId:\s*(.+?),\s*Value:\s*(\S+)$/i.exec(part);
+      if (eqValue) {
+        return `${eqValue[1]} == ${eqValue[2]}`;
+      }
+
+      const eqQuestion =
+        /^EqIdId\s+QuestionId:\s*(.+?),\s*OtherQuestionId:\s*(.+)$/i.exec(
+          part,
+        );
+      if (eqQuestion) {
+        return `${eqQuestion[1]} == ${eqQuestion[2]}`;
+      }
+
+      const inList =
+        /^EqIdValList\s+QuestionId:\s*(.+?),\s*Values:\s*(.+)$/i.exec(part);
+      if (inList) {
+        return `${inList[1]} is one of ${inList[2]}`;
+      }
+
+      return operators[part] ?? part;
+    })
+    .join(" → ");
+}
+
+function determineCondition(
+  setupTxtArray: string[],
+  index: number,
+): {
+  start: string;
+  expression: string;
+  questionIds: string[];
+  varStoreIds: string[];
+  constant: boolean | null;
+} {
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion
   if (!hasScope(/\{ (.*) \}/.exec(setupTxtArray[index + 1])![1])) {
-    return setupTxtArray[index + 2].split(" ")[0].slice(0, -1);
+    const expression = readableExpressionLine(setupTxtArray[index + 1]);
+    const metadata = expressionMetadata(expression);
+    return {
+      start: setupTxtArray[index + 2].split(" ")[0].slice(0, -1),
+      expression,
+      ...metadata,
+      constant: /^(True)(?:\s|$)/i.test(expression)
+        ? true
+        : /^(False)(?:\s|$)/i.test(expression)
+          ? false
+          : null,
+    };
   }
 
   let openScopes = 1;
@@ -419,7 +537,104 @@ function determineSuppressionStart(setupTxtArray: string[], index: number) {
     currentIndex++;
   }
 
-  return setupTxtArray[currentIndex].split(" ")[0].slice(0, -1);
+  const expression = setupTxtArray
+    .slice(index + 1, currentIndex)
+    .map(readableExpressionLine)
+    .filter((line) => line.length > 0 && !/^End(?:\s|$)/i.test(line))
+    .join(" → ");
+  const metadata = expressionMetadata(expression);
+  return {
+    start: setupTxtArray[currentIndex].split(" ")[0].slice(0, -1),
+    expression,
+    ...metadata,
+    constant: /^(True)(?:\s|$)/i.test(expression)
+      ? true
+      : /^(False)(?:\s|$)/i.test(expression)
+        ? false
+        : null,
+  };
+}
+
+function enrichConditions(
+  forms: Forms,
+  varStores: VarStores,
+  conditions: Suppression[],
+) {
+  const prompts = new Map<string, FormChildren>();
+  for (const form of forms) {
+    for (const child of form.children) {
+      prompts.set(
+        `${form.formSetGuid ?? ""}:${String(parseInt(child.questionId))}`,
+        child,
+      );
+    }
+  }
+
+  for (const condition of conditions) {
+    const referenced = (condition.questionIds ?? [])
+      .map((questionId) =>
+        prompts.get(
+          `${condition.formSetGuid ?? ""}:${String(parseInt(questionId))}`,
+        ),
+      )
+      .filter((child): child is FormChildren => child !== undefined);
+    const directVarStores = (condition.varStoreIds ?? []).flatMap(
+      (varStoreId) => {
+        const varStore = varStores.find(
+          (candidate) =>
+            candidate.formSetGuid === condition.formSetGuid &&
+            parseInt(candidate.varStoreId) === parseInt(varStoreId),
+        );
+        return varStore !== undefined ? [{ varStoreId, varStore }] : [];
+      },
+    );
+    const varStoreNames = [
+      ...new Set([
+        ...referenced
+          .map((child) => child.varStoreName)
+          .filter((name): name is string => Boolean(name)),
+        ...directVarStores.map(({ varStore }) => varStore.name),
+      ]),
+    ];
+    condition.varStoreNames = varStoreNames;
+
+    if (condition.constant !== null && condition.constant !== undefined) {
+      condition.source = "constant";
+    } else if (varStoreNames.length === 0) {
+      condition.source = "unknown";
+    } else if (
+      varStoreNames.some((name) => name.trim().toLowerCase() !== "setup")
+    ) {
+      condition.source = "runtime";
+    } else {
+      condition.source = "setup";
+    }
+
+    for (const child of referenced) {
+      const questionIdPattern = new RegExp(
+        `\\b${child.questionId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`,
+        "gi",
+      );
+      condition.expression = (condition.expression ?? "").replace(
+        questionIdPattern,
+        `“${child.name || "Unnamed question"}” (${child.questionId})`,
+      );
+    }
+    for (const { varStoreId, varStore } of directVarStores) {
+      const varStoreIdPattern = new RegExp(
+        `\\bVarStoreId:\\s*${varStoreId.replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&",
+        )}\\b`,
+        "gi",
+      );
+      condition.expression = (condition.expression ?? "").replace(
+        varStoreIdPattern,
+        `VarStore: “${varStore.name}” (${varStore.varStoreId})`,
+      );
+    }
+    condition.expression = humanizeExpression(condition.expression ?? "");
+  }
 }
 
 export async function parseData(files: PopulatedFiles) {
@@ -504,7 +719,9 @@ export async function parseData(files: PopulatedFiles) {
         line,
       );
     const form = /Form FormId: (.*), Title: "(.*)" \{ (.*) \}/.exec(line);
-    const suppressIf = /\{ 0A 82 \}/.exec(line);
+    const condition = /\b(SuppressIf|GrayOutIf|DisableIf)\b.*\{ [0-9A-F ]+ \}/.exec(
+      line,
+    );
     const ref =
       /Ref Prompt: "(.*)", Help: "(.*)", QuestionFlags: (.*), QuestionId: (.*), VarStoreId: (.*), VarStoreInfo: (.*), FormId: (.*) \{ (.*) \}/.exec(
         line,
@@ -555,6 +772,7 @@ export async function parseData(files: PopulatedFiles) {
         varStoreId: varStore[2],
         size: varStore[3],
         name: varStore[4],
+        formSetGuid: currentFormSetGuid,
       });
     }
 
@@ -565,6 +783,7 @@ export async function parseData(files: PopulatedFiles) {
           formId: form[1],
           offset: null,
           formSetGuid: currentFormSetGuid,
+          source: "formset",
         });
         pendingFormSetTitle = null;
       }
@@ -584,17 +803,25 @@ export async function parseData(files: PopulatedFiles) {
       }
     }
 
-    if (suppressIf) {
+    if (condition) {
+      const kind = condition[1] as ConditionKind;
+      const conditionInfo = determineCondition(setupTxtArray, index);
       scopes.push({
-        type: "SuppressIf",
+        type: kind,
         indentations,
         offset,
       });
 
       currentSuppressions.push({
         offset,
+        kind,
         active: true,
-        start: determineSuppressionStart(setupTxtArray, index),
+        start: conditionInfo.start,
+        expression: conditionInfo.expression,
+        questionIds: conditionInfo.questionIds,
+        varStoreIds: conditionInfo.varStoreIds,
+        constant: conditionInfo.constant,
+        formSetGuid: currentFormSetGuid,
       } as Suppression);
     }
 
@@ -607,14 +834,16 @@ export async function parseData(files: PopulatedFiles) {
         type: "Ref",
         questionId: ref[4],
         varStoreId: ref[5],
-        varStoreName: varStores.find(
-          (varStore) => varStore.varStoreId === ref[5],
-        )?.name,
+        varStoreName: findVarStoreName(
+          varStores,
+          ref[5],
+          currentFormSetGuid,
+        ),
         formId,
         ...getAdditionalData(ref[8], setupdataBin, true),
       };
 
-      checkSuppressions(scopes, currentRef);
+      checkConditions(scopes, currentRef);
 
       currentForm.children.push(currentRef);
 
@@ -642,16 +871,18 @@ export async function parseData(files: PopulatedFiles) {
         type: "String",
         questionId: string[4],
         varStoreId: string[5],
-        varStoreName: varStores.find(
-          (varStore) => varStore.varStoreId === string[5],
-        )?.name,
+        varStoreName: findVarStoreName(
+          varStores,
+          string[5],
+          currentFormSetGuid,
+        ),
         accessLevel,
         failsafe,
         optimal,
         offsets,
       };
 
-      checkSuppressions(scopes, currentString);
+      checkConditions(scopes, currentString);
 
       if (hasScope(string[10])) {
         scopes.push({ type: "String", indentations });
@@ -671,9 +902,11 @@ export async function parseData(files: PopulatedFiles) {
         type: "Numeric",
         questionId: numeric[4],
         varStoreId: numeric[5],
-        varStoreName: varStores.find(
-          (varStore) => varStore.varStoreId === numeric[5],
-        )?.name,
+        varStoreName: findVarStoreName(
+          varStores,
+          numeric[5],
+          currentFormSetGuid,
+        ),
         varOffset: numeric[6],
         size: numeric[8],
         min: numeric[9],
@@ -685,7 +918,7 @@ export async function parseData(files: PopulatedFiles) {
         offsets,
       };
 
-      checkSuppressions(scopes, currentNumeric);
+      checkConditions(scopes, currentNumeric);
 
       if (hasScope(numeric[12])) {
         scopes.push({ type: "Numeric", indentations });
@@ -705,9 +938,11 @@ export async function parseData(files: PopulatedFiles) {
         type: "CheckBox",
         questionId: checkBox[4],
         varStoreId: checkBox[5],
-        varStoreName: varStores.find(
-          (varStore) => varStore.varStoreId === checkBox[5],
-        )?.name,
+        varStoreName: findVarStoreName(
+          varStores,
+          checkBox[5],
+          currentFormSetGuid,
+        ),
         varOffset: checkBox[6],
         flags: checkBox[7],
         accessLevel,
@@ -716,7 +951,7 @@ export async function parseData(files: PopulatedFiles) {
         offsets,
       };
 
-      checkSuppressions(scopes, currentCheckBox);
+      checkConditions(scopes, currentCheckBox);
 
       if (hasScope(checkBox[8])) {
         scopes.push({ type: "CheckBox", indentations });
@@ -736,9 +971,11 @@ export async function parseData(files: PopulatedFiles) {
         type: "OneOf",
         questionId: oneOf[4],
         varStoreId: oneOf[5],
-        varStoreName: varStores.find(
-          (varStore) => varStore.varStoreId === oneOf[5],
-        )?.name,
+        varStoreName: findVarStoreName(
+          varStores,
+          oneOf[5],
+          currentFormSetGuid,
+        ),
         varOffset: oneOf[6],
         size: oneOf[8],
         options: [],
@@ -748,7 +985,7 @@ export async function parseData(files: PopulatedFiles) {
         offsets,
       };
 
-      checkSuppressions(scopes, currentOneOf);
+      checkConditions(scopes, currentOneOf);
 
       if (hasScope(oneOf[12])) {
         scopes.push({ type: "OneOf", indentations });
@@ -757,7 +994,7 @@ export async function parseData(files: PopulatedFiles) {
 
     if (
       oneOfOption &&
-      (currentScope.type === "OneOf" || currentScope.type === "SuppressIf")
+      (currentScope.type === "OneOf" || isConditionKind(currentScope.type))
     ) {
       currentOneOf.options.push({
         option: oneOfOption[1],
@@ -820,6 +1057,8 @@ export async function parseData(files: PopulatedFiles) {
     return {} as Data;
   }
 
+  enrichConditions(forms, varStores, suppressions);
+
   const matches = [...formSetIds].flatMap((formSetId) =>
     [...amitseSct.matchAll(new RegExp(formSetId + "(.{4})", "g"))].map(
       (match) => ({ match, formSetId }),
@@ -845,6 +1084,7 @@ export async function parseData(files: PopulatedFiles) {
         formId: hexEntry,
         offset: decToHexString((match.index + formSetId.length) / 2),
         formSetGuid: formSet?.guid,
+        source: "amitse" as const,
       };
     })
     .filter((x) => x.name);

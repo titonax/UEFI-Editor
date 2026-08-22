@@ -6,46 +6,132 @@ import {
   TextInput,
   NativeSelect,
   Spoiler,
-  Chip,
   Stack,
   Group,
+  Badge,
+  Button,
+  Text,
+  Tooltip,
 } from "@mantine/core";
 import { useDebouncedState } from "@mantine/hooks";
-import type { Data, FormChildren } from "../scripts/types";
+import type {
+  Data,
+  FormChildren,
+  VisibilityStatus,
+} from "../scripts/types";
 import { validateByteInput } from "../scripts/scripts";
 import SearchUi from "./SearchUi/SearchUi";
+import {
+  childVisibility,
+  conditionsForChild,
+  summarizeFormBranch,
+} from "../scripts/visibility";
+import { buildMenuTree, findNodePath } from "../Navigation/menuTree";
 
-interface SuppressionChipProps {
-  suppressionOffset: string;
-  data: Data;
-  setData: Updater<Data>;
-}
+const visibilityColors = {
+  visible: "green",
+  hidden: "red",
+  conditional: "orange",
+  unknown: "gray",
+  orphaned: "red",
+  broken: "pink",
+} as const;
 
-function SuppressionChip({
-  suppressionOffset,
+function ConditionDetails({
+  child,
   data,
   setData,
-}: SuppressionChipProps) {
-  const suppressionIndex = data.suppressions.findIndex(
-    (suppression) => suppression.offset === suppressionOffset
-  );
-
-  const suppression = data.suppressions[suppressionIndex];
+}: {
+  child: FormChildren;
+  data: Data;
+  setData: Updater<Data>;
+}) {
+  const conditions = conditionsForChild(data, child);
+  if (conditions.length === 0 && child.accessLevel === null) {
+    return <Text size="xs" c="dimmed">No condition</Text>;
+  }
 
   return (
-    <Chip
-      size="xs"
-      color="rgb(224, 49, 49)"
-      variant="outline"
-      checked={suppression.active}
-      onClick={() => {
-        setData((draft) => {
-          draft.suppressions[suppressionIndex].active = !suppression.active;
-        });
-      }}
-    >
-      {suppressionOffset}
-    </Chip>
+    <Stack gap={5} className={s.conditionList}>
+      {conditions.map((condition) => {
+        const index = data.suppressions.indexOf(condition);
+        const kind = condition.kind ?? "SuppressIf";
+        const runtime = condition.source === "runtime";
+        const sourceLabel = runtime
+          ? "Runtime / HW candidate"
+          : condition.source === "setup"
+            ? "Setup variable"
+            : condition.source ?? "unknown";
+        return (
+          <div key={condition.offset} className={s.conditionCard}>
+            <Group gap={5} justify="space-between" wrap="nowrap">
+              <Group gap={5} wrap="wrap">
+                <Badge size="xs" color={runtime ? "orange" : kind === "SuppressIf" ? "red" : "yellow"}>
+                  {kind}
+                </Badge>
+                <Tooltip
+                  label={
+                    condition.varStoreNames?.length
+                      ? `VarStore: ${condition.varStoreNames.join(", ")}`
+                      : "Variable source could not be resolved"
+                  }
+                >
+                  <Badge size="xs" variant="outline" color={runtime ? "orange" : "gray"}>
+                    {sourceLabel}
+                  </Badge>
+                </Tooltip>
+              </Group>
+              {kind === "SuppressIf" ? (
+                <Tooltip label="Disable this suppression in the generated change set">
+                  <Button
+                    size="compact-xs"
+                    color={condition.active ? "red" : "green"}
+                    variant={condition.active ? "light" : "filled"}
+                    onClick={() => {
+                      if (index < 0) {
+                        return;
+                      }
+                      setData((draft) => {
+                        draft.suppressions[index].active = !condition.active;
+                      });
+                    }}
+                  >
+                    {condition.active ? "Force visible" : "Visibility forced"}
+                  </Button>
+                </Tooltip>
+              ) : (
+                <Badge size="xs" color="gray" variant="light">Read-only</Badge>
+              )}
+            </Group>
+            <Text size="xs" mt={4} className={s.conditionExpression}>
+              {condition.expression ?? `Condition at ${condition.offset}`}
+            </Text>
+            <Text size="xs" c="dimmed" mt={3}>
+              IFR condition offset: {condition.offset}
+            </Text>
+            {condition.varStoreNames?.length ? (
+              <Text size="xs" c="dimmed" mt={3}>
+                VarStore: {condition.varStoreNames.join(", ")}
+              </Text>
+            ) : null}
+          </div>
+        );
+      })}
+      {child.accessLevel !== null ? (
+        <div className={s.conditionCard}>
+          <Badge size="xs" color="gray" variant="outline">
+            AMI access policy
+          </Badge>
+          <Text size="xs" mt={4} className={s.conditionExpression}>
+            SetupData AccessLevel == 0x{child.accessLevel}
+          </Text>
+          <Text size="xs" c="dimmed" mt={3}>
+            Shown as evidence only; this byte is not classified as hidden or
+            visible without model-specific proof.
+          </Text>
+        </div>
+      ) : null}
+    </Stack>
   );
 }
 
@@ -68,6 +154,7 @@ const TableRow = React.memo(
     currentFormIndex,
   }: TableRowProps) {
     const type = child.type;
+    const visibility = childVisibility(data, child);
     const info = [];
 
     if (type === "CheckBox" || type === "OneOf" || type === "Numeric") {
@@ -139,6 +226,13 @@ const TableRow = React.memo(
           {child.name}
         </td>
         <td>{type}</td>
+        <td>
+          <Tooltip label={visibility.explanation} multiline w={320}>
+            <Badge color={visibilityColors[visibility.status]} variant="light">
+              {visibility.label}
+            </Badge>
+          </Tooltip>
+        </td>
         <td className={s.width}>
           {child.accessLevel !== null && (
             <TextInput
@@ -190,18 +284,7 @@ const TableRow = React.memo(
             />
           )}
         </td>
-        <td>
-          <Group gap="xs">
-            {child.suppressIf?.map((suppressionOffset, index) => (
-              <SuppressionChip
-                key={index.toString() + suppressionOffset}
-                suppressionOffset={suppressionOffset}
-                data={data}
-                setData={setData}
-              />
-            ))}
-          </Group>
-        </td>
+        <td><ConditionDetails child={child} data={data} setData={setData} /></td>
         <td>
           <Spoiler
             transitionDuration={0}
@@ -258,7 +341,7 @@ const TableRow = React.memo(
       oldChild.failsafe === newChild.failsafe &&
       oldChild.optimal === newChild.optimal &&
       JSON.stringify(
-        oldChild.suppressIf?.map(
+        (oldChild.conditions ?? oldChild.suppressIf ?? []).map(
           (offset) =>
             oldProps.data.suppressions.find(
               (suppression) => suppression.offset === offset
@@ -266,7 +349,7 @@ const TableRow = React.memo(
         )
       ) ===
         JSON.stringify(
-          newChild.suppressIf?.map(
+          (newChild.conditions ?? newChild.suppressIf ?? []).map(
             (offset) =>
               newProps.data.suppressions.find(
                 (suppression) => suppression.offset === offset
@@ -291,6 +374,7 @@ export default function FormUi({
   setCurrentFormIndex,
 }: FormUiProps) {
   const [search, setSearch] = useDebouncedState("", 200);
+  const semanticTree = React.useMemo(() => buildMenuTree(data), [data]);
 
   function handleRefClick(formId: string, formSetGuid?: string) {
     const sourceFormSetGuid =
@@ -335,6 +419,7 @@ export default function FormUi({
           <Table.Tr>
             <Table.Th>Name</Table.Th>
             <Table.Th>Form Id</Table.Th>
+            <Table.Th>Visibility</Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -378,6 +463,30 @@ export default function FormUi({
                   }}
                 />
               </Table.Td>
+              <Table.Td>
+                <Tooltip
+                  label={
+                    entry.source === "amitse" || entry.offset !== null
+                      ? "This root is present in the AMITSE menu table."
+                      : "This FormSet exists in HII, but its presence in the visible AMITSE tab list is not confirmed."
+                  }
+                  multiline
+                  w={320}
+                >
+                  <Badge
+                    color={
+                      entry.source === "amitse" || entry.offset !== null
+                        ? "green"
+                        : "gray"
+                    }
+                    variant="light"
+                  >
+                    {entry.source === "amitse" || entry.offset !== null
+                      ? "Confirmed"
+                      : "Not confirmed"}
+                  </Badge>
+                </Tooltip>
+              </Table.Td>
             </Table.Tr>
           ))}
         </Table.Tbody>
@@ -385,16 +494,81 @@ export default function FormUi({
     );
   }
 
+  const currentPath = findNodePath(semanticTree.roots, currentFormIndex);
+  const orphanPath =
+    currentPath.length === 0
+      ? findNodePath(semanticTree.orphans, currentFormIndex)
+      : [];
+  const activePath = currentPath.length > 0 ? currentPath : orphanPath;
+  const pageNode = activePath[activePath.length - 1];
+  const pageStatus = pageNode.status;
+  const visibilitySummary = summarizeFormBranch(
+    data,
+    currentFormIndex,
+    pageStatus,
+  );
+
+  function summaryBadges(counts: Record<VisibilityStatus, number>) {
+    return (
+      <>
+        <Badge color="green">{counts.visible} visible</Badge>
+        <Badge color="red">{counts.hidden} hidden</Badge>
+        <Badge color="orange">{counts.conditional} conditional</Badge>
+        {counts.orphaned > 0 && (
+          <Badge color="red">{counts.orphaned} orphaned</Badge>
+        )}
+        {counts.broken > 0 && (
+          <Badge color="pink">{counts.broken} broken</Badge>
+        )}
+        {counts.unknown > 0 && (
+          <Badge color="gray">{counts.unknown} unresolved</Badge>
+        )}
+      </>
+    );
+  }
+
   return (
-    <Table stickyHeader stickyHeaderOffset={60} striped withColumnBorders>
+    <Stack gap={0}>
+      <Stack gap={4} className={s.visibilitySummary}>
+        <Group gap="xs">
+          <Text size="sm" fw={600}>Selected path:</Text>
+          <Tooltip
+            label={
+              pageNode.conditionSummary ??
+              "No confirmed path from an AMITSE root was found."
+            }
+            multiline
+            w={420}
+          >
+            <Badge color={visibilityColors[pageStatus]} variant="light">
+              {pageNode.statusLabel}
+            </Badge>
+          </Tooltip>
+        </Group>
+        <Group gap="xs">
+          <Text size="sm" fw={600}>This page:</Text>
+          {summaryBadges(visibilitySummary.direct)}
+        </Group>
+        <Group gap="xs">
+          <Tooltip label="Includes controls and Ref targets in every nested page">
+            <Text size="sm" fw={600}>Whole branch:</Text>
+          </Tooltip>
+          {summaryBadges(visibilitySummary.branch)}
+          <Text size="xs" c="dimmed">
+            {visibilitySummary.descendantForms} nested pages
+          </Text>
+        </Group>
+      </Stack>
+      <Table stickyHeader stickyHeaderOffset={150} striped withColumnBorders>
       <Table.Thead>
         <Table.Tr>
           <Table.Th>Name</Table.Th>
           <Table.Th>Type</Table.Th>
+          <Table.Th>Visibility</Table.Th>
           <Table.Th>Access Level</Table.Th>
           <Table.Th>Failsafe</Table.Th>
           <Table.Th>Optimal</Table.Th>
-          <Table.Th>Suppress If</Table.Th>
+          <Table.Th>Condition</Table.Th>
           <Table.Th>Info</Table.Th>
         </Table.Tr>
       </Table.Thead>
@@ -411,6 +585,7 @@ export default function FormUi({
           />
         ))}
       </Table.Tbody>
-    </Table>
+      </Table>
+    </Stack>
   );
 }
