@@ -64,8 +64,17 @@ export default function BiosImageUpload({ onExtracted }: BiosImageUploadProps) {
                 const ifrFile = new File([artifacts.ifrText], "setup-aptio-iv.ifr.txt", {
                   type: "text/plain",
                 });
-                const emptyAmitse = new File([], "amitse-aptio-iv.bin");
-                const emptySetupData = new File([], "setupdata-aptio-iv.bin");
+                const amitseBytes = artifacts.amitse ?? new Uint8Array();
+                const setupDataBytes =
+                  artifacts.setupData ?? new Uint8Array();
+                const amitseFile = new File(
+                  [amitseBytes],
+                  "amitse-aptio-iv.bin",
+                );
+                const setupDataFile = new File(
+                  [setupDataBytes],
+                  "setupdata-aptio-iv.bin",
+                );
                 await onExtracted({
                   setupSctContainer: {
                     file: setupFile,
@@ -78,13 +87,13 @@ export default function BiosImageUpload({ onExtracted }: BiosImageUploadProps) {
                     isWrongFile: false,
                   },
                   amitseSctContainer: {
-                    file: emptyAmitse,
-                    textContent: "",
+                    file: amitseFile,
+                    textContent: toHex(amitseBytes),
                     isWrongFile: false,
                   },
                   setupdataBinContainer: {
-                    file: emptySetupData,
-                    textContent: "",
+                    file: setupDataFile,
+                    textContent: toHex(setupDataBytes),
                     isWrongFile: false,
                   },
                 });
