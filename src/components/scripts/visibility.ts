@@ -153,9 +153,6 @@ export function summarizeFormBranch(
     depth: number,
   ) {
     const form = data.forms[formIndex];
-    if (!form) {
-      return;
-    }
 
     const nextAncestors = new Set(ancestors);
     nextAncestors.add(formIndex);

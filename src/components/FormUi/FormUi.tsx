@@ -104,7 +104,7 @@ function ConditionDetails({
               )}
             </Group>
             <Text size="xs" mt={4} className={s.conditionExpression}>
-              {condition.expression || `Condition at ${condition.offset}`}
+              {condition.expression ?? `Condition at ${condition.offset}`}
             </Text>
             <Text size="xs" c="dimmed" mt={3}>
               IFR condition offset: {condition.offset}
@@ -501,7 +501,7 @@ export default function FormUi({
       : [];
   const activePath = currentPath.length > 0 ? currentPath : orphanPath;
   const pageNode = activePath[activePath.length - 1];
-  const pageStatus = pageNode?.status ?? "unknown";
+  const pageStatus = pageNode.status;
   const visibilitySummary = summarizeFormBranch(
     data,
     currentFormIndex,
@@ -534,14 +534,14 @@ export default function FormUi({
           <Text size="sm" fw={600}>Selected path:</Text>
           <Tooltip
             label={
-              pageNode?.conditionSummary ??
+              pageNode.conditionSummary ??
               "No confirmed path from an AMITSE root was found."
             }
             multiline
             w={420}
           >
             <Badge color={visibilityColors[pageStatus]} variant="light">
-              {pageNode?.statusLabel ?? "Not confirmed"}
+              {pageNode.statusLabel}
             </Badge>
           </Tooltip>
         </Group>
