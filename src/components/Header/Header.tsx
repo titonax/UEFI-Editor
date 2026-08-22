@@ -2,6 +2,7 @@ import React from "react";
 import { Group } from "@mantine/core";
 import s from "./Header.module.css";
 import type { Data } from "../scripts/types";
+import { buildMenuTree, findNodePath } from "../Navigation/menuTree";
 
 interface HeaderProps {
   data: Data;
@@ -14,60 +15,58 @@ export default function Header({
   currentFormIndex,
   setCurrentFormIndex,
 }: HeaderProps) {
-  const currentForm = data.forms[currentFormIndex];
+  const tree = React.useMemo(() => buildMenuTree(data), [data]);
+  const activePath = React.useMemo(() => {
+    if (currentFormIndex < 0) {
+      return [];
+    }
+    const rootPath = findNodePath(tree.roots, currentFormIndex);
+    return rootPath.length > 0
+      ? rootPath
+      : findNodePath(tree.orphans, currentFormIndex);
+  }, [currentFormIndex, tree.orphans, tree.roots]);
+  const currentNode = activePath[activePath.length - 1];
+  const profile = tree.profiles.find(
+    (candidate) => candidate.id === currentNode?.profileId,
+  );
 
-  function findRelatedForm(formId: string) {
-    return (
-      data.forms.find(
-        (form) =>
-          form.formSetGuid === currentForm.formSetGuid &&
-          parseInt(form.formId) === parseInt(formId),
-      ) ??
-      data.forms.find(
-        (form) => parseInt(form.formId) === parseInt(formId),
-      )
-    );
+  function navigate(formIndex: number | null) {
+    if (formIndex === null) {
+      return;
+    }
+    setCurrentFormIndex(formIndex);
+    document.getElementById(`nav-${String(formIndex)}`)?.scrollIntoView();
   }
 
   return (
     <>
-      {currentFormIndex >= 0 && (
+      {currentFormIndex >= 0 && currentNode && (
         <div className={s.root}>
           <Group gap="xs">
-            {currentForm.referencedIn.length > 0 && (
+            {profile && (
               <>
-                {currentForm.referencedIn.map((formId) => {
-                  const referencedForm = findRelatedForm(formId);
-                  const formIndex = referencedForm
-                    ? data.forms.indexOf(referencedForm)
-                    : -1;
-
-                  return (
-                    <div
-                      key={
-                        (currentForm.formSetGuid ?? "") +
-                        currentForm.formId +
-                        formId
-                      }
-                      className={s.pointer}
-                      onClick={() => {
-                        if (formIndex >= 0) {
-                          setCurrentFormIndex(formIndex);
-
-                          document
-                            .getElementById(`nav-${formIndex.toString()}`)
-                            ?.scrollIntoView();
-                        }
-                      }}
-                    >
-                      {referencedForm?.name}
-                    </div>
-                  );
-                })}
+                <div>{profile.label}</div>
                 <div>{">"}</div>
               </>
             )}
-            <div>{currentForm.name}</div>
+            {activePath.map((node, index) => {
+              const last = index === activePath.length - 1;
+              return (
+                <React.Fragment key={node.key}>
+                  <div
+                    className={last ? undefined : s.pointer}
+                    onClick={() => {
+                      if (!last) {
+                        navigate(node.formIndex);
+                      }
+                    }}
+                  >
+                    {node.label}
+                  </div>
+                  {!last && <div>{">"}</div>}
+                </React.Fragment>
+              );
+            })}
           </Group>
         </div>
       )}
