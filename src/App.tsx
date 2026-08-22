@@ -13,6 +13,7 @@ import Header from "./components/Header/Header";
 import Footer from "./components/Footer/Footer";
 import { IconBrandGithub } from "@tabler/icons-react";
 import BiosImageUpload from "./components/BiosImageUpload/BiosImageUpload";
+import { parseData } from "./components/scripts/scripts";
 
 export default function App() {
   const [files, setFiles] = useImmer<Files>({
@@ -63,7 +64,14 @@ export default function App() {
         </>
       ) : (
         <Stack className={s.padding} gap="xl">
-          <BiosImageUpload />
+          <BiosImageUpload
+            onExtracted={async (extractedFiles) => {
+              setFiles(extractedFiles);
+              const parsed = await parseData(extractedFiles);
+              parsed.firmwareFamily = "aptio-iv";
+              setData(parsed);
+            }}
+          />
           <FileUploads files={files} setFiles={setFiles} setData={setData} />
           <Group justify="center">
             <Button
