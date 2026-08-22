@@ -31,7 +31,14 @@ export interface Suppression {
 }
 
 export type ConditionKind = "SuppressIf" | "GrayOutIf" | "DisableIf";
-export type ConditionSource = "setup" | "runtime" | "constant" | "unknown";
+export type ConditionSource =
+  | "setup"
+  | "hardware"
+  | "access"
+  | "ui"
+  | "runtime"
+  | "constant"
+  | "unknown";
 export type VisibilityStatus =
   | "visible"
   | "hidden"
@@ -45,7 +52,9 @@ export type Menu = {
   formId: string;
   offset: string | null;
   formSetGuid?: string;
-  source?: "amitse" | "formset";
+  source?: "amitse" | "setupdata" | "formset";
+  pageMask?: string;
+  pageInfoOffset?: string;
 }[];
 
 export type Forms = Form[];
