@@ -15,6 +15,7 @@ import {
 } from "@mantine/core";
 import { useDebouncedState } from "@mantine/hooks";
 import type {
+  ConditionSource,
   Data,
   FormChildren,
   VisibilityStatus,
@@ -27,6 +28,50 @@ import {
   summarizeFormBranch,
 } from "../scripts/visibility";
 import { buildMenuTree, findNodePath } from "../Navigation/menuTree";
+
+const conditionSourceMeta: Record<
+  ConditionSource,
+  { label: string; color: string; explanation: string }
+> = {
+  setup: {
+    label: "Setup value",
+    color: "blue",
+    explanation: "The condition reads a user-configurable Setup value.",
+  },
+  hardware: {
+    label: "HW capability",
+    color: "yellow",
+    explanation:
+      "The condition reads a firmware-populated platform or CPU capability flag.",
+  },
+  access: {
+    label: "Access policy",
+    color: "violet",
+    explanation:
+      "The condition depends on AMI user/admin access or security state, not hardware.",
+  },
+  ui: {
+    label: "AMI UI state",
+    color: "cyan",
+    explanation: "The condition depends on AMITSE navigation or UI state.",
+  },
+  runtime: {
+    label: "Runtime variable",
+    color: "orange",
+    explanation:
+      "The variable is evaluated at runtime but is not classified as hardware, access, or UI state.",
+  },
+  constant: {
+    label: "Constant",
+    color: "gray",
+    explanation: "The IFR expression has a constant result.",
+  },
+  unknown: {
+    label: "Unknown source",
+    color: "gray",
+    explanation: "The variable source could not be resolved.",
+  },
+};
 
 const visibilityColors = {
   visible: "green",
@@ -56,12 +101,8 @@ function ConditionDetails({
       {conditions.map((condition) => {
         const index = data.suppressions.indexOf(condition);
         const kind = condition.kind ?? "SuppressIf";
-        const runtime = condition.source === "runtime";
-        const sourceLabel = runtime
-          ? "Runtime / HW source"
-          : condition.source === "setup"
-            ? "Setup variable"
-            : condition.source ?? "unknown";
+        const source = condition.source ?? "unknown";
+        const sourceMeta = conditionSourceMeta[source];
         return (
           <div key={condition.offset} className={s.conditionCard}>
             <Group gap={5} justify="space-between" wrap="nowrap">
@@ -71,13 +112,21 @@ function ConditionDetails({
                 </Badge>
                 <Tooltip
                   label={
-                    condition.varStoreNames?.length
-                      ? `VarStore: ${condition.varStoreNames.join(", ")}`
-                      : "Variable source could not be resolved"
+                    `${sourceMeta.explanation}${
+                      condition.varStoreNames?.length
+                        ? ` VarStore: ${condition.varStoreNames.join(", ")}.`
+                        : ""
+                    }`
                   }
+                  multiline
+                  w={340}
                 >
-                  <Badge size="xs" variant="outline" color={runtime ? "orange" : "gray"}>
-                    {sourceLabel}
+                  <Badge
+                    size="xs"
+                    variant="outline"
+                    color={sourceMeta.color}
+                  >
+                    {sourceMeta.label}
                   </Badge>
                 </Tooltip>
               </Group>
@@ -467,28 +516,53 @@ export default function FormUi({
                 />
               </Table.Td>
               <Table.Td>
-                <Tooltip
-                  label={
-                    entry.source === "amitse" || entry.offset !== null
-                      ? "This root is present in the AMITSE menu table."
-                      : "This is the entry form declared by its HII FormSet. It is structural evidence, not a runtime visibility condition."
-                  }
-                  multiline
-                  w={320}
-                >
-                  <Badge
-                    color={
-                      entry.source === "amitse" || entry.offset !== null
-                        ? "green"
-                        : "blue"
+                <Group gap={5}>
+                  <Tooltip
+                    label={
+                      entry.source === "setupdata"
+                        ? `This root is registered in the AMITSE SetupData page list${entry.pageMask ? ` with page mask ${entry.pageMask}` : ""}.`
+                        : entry.source === "amitse" || entry.offset !== null
+                          ? "This root is present in the AMITSE executable menu table."
+                          : "This is the entry form declared by its HII FormSet. It is structural evidence, not a runtime visibility condition."
                     }
-                    variant="light"
+                    multiline
+                    w={360}
                   >
-                    {entry.source === "amitse" || entry.offset !== null
-                      ? "AMITSE menu"
-                      : "HII FormSet entry"}
-                  </Badge>
-                </Tooltip>
+                    <Badge
+                      color={
+                        entry.source === "setupdata"
+                          ? "cyan"
+                          : entry.source === "amitse" || entry.offset !== null
+                            ? "green"
+                            : "blue"
+                      }
+                      variant="light"
+                    >
+                      {entry.source === "setupdata"
+                        ? `SetupData page ${entry.pageMask ?? ""}`
+                        : entry.source === "amitse" || entry.offset !== null
+                          ? "AMITSE menu"
+                          : "HII FormSet entry"}
+                    </Badge>
+                  </Tooltip>
+                  {semanticTree.roots[index]?.profileLabel && (
+                    <Badge
+                      size="xs"
+                      color={
+                        semanticTree.roots[index].profileAssessment ===
+                        "probable-live"
+                          ? "green"
+                          : semanticTree.roots[index].profileAssessment ===
+                              "probable-fallback"
+                            ? "orange"
+                            : "gray"
+                      }
+                      variant="outline"
+                    >
+                      {semanticTree.roots[index].profileLabel}
+                    </Badge>
+                  )}
+                </Group>
               </Table.Td>
             </Table.Tr>
           ))}
@@ -504,6 +578,9 @@ export default function FormUi({
       : [];
   const activePath = currentPath.length > 0 ? currentPath : orphanPath;
   const pageNode = activePath[activePath.length - 1];
+  const activeProfile = semanticTree.profiles.find(
+    (profile) => profile.id === pageNode.profileId,
+  );
   const pageStatus = pageNode.status;
   const visibilitySummary = summarizeFormBranch(
     data,
@@ -532,6 +609,38 @@ export default function FormUi({
     );
   }
 
+  function sourceBadges(counts: Record<ConditionSource, number>) {
+    return (
+      <>
+        {counts.hardware > 0 && (
+          <Badge color="yellow" variant="outline">
+            {counts.hardware} HW capability
+          </Badge>
+        )}
+        {counts.access > 0 && (
+          <Badge color="violet" variant="outline">
+            {counts.access} access policy
+          </Badge>
+        )}
+        {counts.ui > 0 && (
+          <Badge color="cyan" variant="outline">
+            {counts.ui} UI state
+          </Badge>
+        )}
+        {counts.setup > 0 && (
+          <Badge color="blue" variant="outline">
+            {counts.setup} Setup value
+          </Badge>
+        )}
+        {counts.runtime > 0 && (
+          <Badge color="orange" variant="outline">
+            {counts.runtime} other runtime
+          </Badge>
+        )}
+      </>
+    );
+  }
+
   return (
     <Stack gap={0}>
       <Stack gap={4} className={s.visibilitySummary}>
@@ -551,6 +660,26 @@ export default function FormUi({
               {pageNode.reachabilityLabel}
             </Badge>
           </Tooltip>
+          {activeProfile && (
+            <Tooltip
+              label={activeProfile.evidence.join(" ")}
+              multiline
+              w={460}
+            >
+              <Badge
+                color={
+                  activeProfile.assessment === "probable-live"
+                    ? "green"
+                    : activeProfile.assessment === "probable-fallback"
+                      ? "orange"
+                      : "gray"
+                }
+                variant="outline"
+              >
+                {activeProfile.label}
+              </Badge>
+            </Tooltip>
+          )}
           {(pageStatus === "hidden" || pageStatus === "conditional") && (
             <Tooltip label={pageNode.conditionSummary} multiline w={420}>
               <Badge color={visibilityColors[pageStatus]} variant="light">
@@ -559,18 +688,36 @@ export default function FormUi({
             </Tooltip>
           )}
           {pageNode.hardwareDependent && (
-            <Badge color="yellow" variant="outline">HW/runtime source</Badge>
+            <Badge color="yellow" variant="outline">HW capability</Badge>
           )}
+          {pageNode.accessDependent && (
+            <Badge color="violet" variant="outline">Access policy</Badge>
+          )}
+          {pageNode.uiStateDependent && (
+            <Badge color="cyan" variant="outline">AMI UI state</Badge>
+          )}
+        </Group>
+        <Group gap="xs" wrap="nowrap">
+          <Text size="sm" fw={600}>Parentage:</Text>
+          <Tooltip
+            label={`${String(pageNode.incomingReferenceCount)} incoming IFR Ref(s); ${String(pageNode.outgoingReferenceCount)} outgoing IFR Ref(s).`}
+          >
+            <Text size="xs" c="dimmed">
+              {pageNode.parentageLabel}
+            </Text>
+          </Tooltip>
         </Group>
         <Group gap="xs">
           <Text size="sm" fw={600}>This page:</Text>
           {summaryBadges(visibilitySummary.direct)}
+          {sourceBadges(visibilitySummary.directSources)}
         </Group>
         <Group gap="xs">
           <Tooltip label="Includes controls and Ref targets in every nested page">
             <Text size="sm" fw={600}>Whole branch:</Text>
           </Tooltip>
           {summaryBadges(visibilitySummary.branch)}
+          {sourceBadges(visibilitySummary.branchSources)}
           <Text size="xs" c="dimmed">
             {visibilitySummary.descendantForms} nested pages
           </Text>
