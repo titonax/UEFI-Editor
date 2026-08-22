@@ -1,6 +1,7 @@
 export interface Data {
   firmwareFamily: "aptio-v" | "aptio-iv";
   menu: Menu;
+  formSetRoots?: Menu;
   varStores: VarStores;
   forms: Forms;
   suppressions: Suppression[];
@@ -90,6 +91,7 @@ export type FormChildren =
 export interface RefPrompt extends FormChild {
   type: "Ref";
   formId: string;
+  targetFormSetGuid?: string;
   pageId: string | null;
 }
 
