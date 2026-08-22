@@ -7,9 +7,11 @@ import type {
 
 export interface VisibilityInfo {
   status: VisibilityStatus;
+  gate: "none" | "suppression" | "availability";
   label: string;
   explanation: string;
   conditions: Suppression[];
+  hardwareDependent: boolean;
 }
 
 export type VisibilityCounts = Record<VisibilityStatus, number>;
@@ -21,11 +23,11 @@ export interface FormBranchVisibility {
 }
 
 const labels: Record<VisibilityStatus, string> = {
-  visible: "Statically visible",
-  hidden: "Hidden",
-  conditional: "Conditional",
-  unknown: "Not confirmed",
-  orphaned: "Orphaned",
+  visible: "No visibility gate",
+  hidden: "Hiding gate",
+  conditional: "Availability gate",
+  unknown: "Unknown",
+  orphaned: "Detached",
   broken: "Broken reference",
 };
 
@@ -48,41 +50,59 @@ export function childVisibility(
   const conditions = conditionsForChild(data, child).filter(
     (condition) => condition.active,
   );
-  const suppressions = conditions.filter(
+  const effectiveConditions = conditions.filter(
+    (condition) => condition.constant !== false,
+  );
+  const suppressions = effectiveConditions.filter(
     (condition) => (condition.kind ?? "SuppressIf") === "SuppressIf",
   );
+  const hardwareDependent = effectiveConditions.some(
+    (condition) => condition.source === "runtime",
+  );
 
-  if (suppressions.some((condition) => condition.constant === true)) {
+  if (suppressions.length > 0) {
+    const alwaysHidden = suppressions.some(
+      (condition) => condition.constant === true,
+    );
     return {
       status: "hidden",
-      label: labels.hidden,
-      explanation: "The IFR contains an always-true SuppressIf condition.",
+      gate: "suppression",
+      label: alwaysHidden ? "Always hidden" : "Hidden when true",
+      explanation: alwaysHidden
+        ? "The IFR contains an always-true SuppressIf gate, so this item is hidden."
+        : "SuppressIf is a real HII hiding gate. The item is hidden whenever the displayed expression evaluates to true; its current runtime value is not stored in the firmware image.",
       conditions,
+      hardwareDependent,
     };
   }
 
-  if (conditions.some((condition) => condition.constant !== false)) {
-    const runtime = conditions.some(
-      (condition) => condition.source === "runtime",
-    );
+  const availabilityConditions = effectiveConditions.filter((condition) => {
+    const kind = condition.kind ?? "SuppressIf";
+    return kind === "GrayOutIf" || kind === "DisableIf";
+  });
+
+  if (availabilityConditions.length > 0) {
     return {
       status: "conditional",
-      label: runtime ? "Runtime / HW candidate" : labels.conditional,
-      explanation: runtime
-        ? "Visibility depends on a non-Setup runtime variable; hardware involvement is possible but not yet proven."
-        : "Visibility depends on an IFR expression whose current runtime value is not available in the image.",
+      gate: "availability",
+      label: "Disabled / gray when true",
+      explanation:
+        "GrayOutIf or DisableIf keeps the item in the HII structure but makes it unavailable whenever the displayed expression evaluates to true.",
       conditions,
+      hardwareDependent,
     };
   }
 
   return {
     status: "visible",
+    gate: "none",
     label: labels.visible,
     explanation:
       child.accessLevel === null
-        ? "No active IFR condition is known to hide this item."
+        ? "No active SuppressIf, GrayOutIf, or DisableIf gate affects this item."
         : `No active IFR condition is known. AMI SetupData AccessLevel is 0x${child.accessLevel}; that policy byte is reported separately and is not treated as proof of live visibility.`,
     conditions,
+    hardwareDependent: false,
   };
 }
 
@@ -90,16 +110,20 @@ export function combineVisibility(
   parent: VisibilityStatus,
   child: VisibilityStatus,
 ): VisibilityStatus {
-  const priority: Record<VisibilityStatus, number> = {
-    visible: 0,
-    unknown: 1,
-    conditional: 2,
-    hidden: 3,
-    orphaned: 4,
-    broken: 5,
-  };
+  const parentGate =
+    parent === "hidden" || parent === "conditional" ? parent : "visible";
+  const childGate =
+    child === "hidden" || child === "conditional" ? child : "visible";
 
-  return priority[parent] >= priority[child] ? parent : child;
+  if (parentGate === "hidden" || childGate === "hidden") {
+    return "hidden";
+  }
+
+  if (parentGate === "conditional" || childGate === "conditional") {
+    return "conditional";
+  }
+
+  return "visible";
 }
 
 function emptyCounts(): VisibilityCounts {
@@ -126,7 +150,8 @@ function findReferencedForm(
   const normalized = normalizedFormId(formId);
   const inFormSet = data.forms.findIndex(
     (form) =>
-      form.formSetGuid === formSetGuid &&
+      (form.formSetGuid ?? "").toLowerCase() ===
+        (formSetGuid ?? "").toLowerCase() &&
       normalizedFormId(form.formId) === normalized,
   );
 
@@ -168,7 +193,7 @@ export function summarizeFormBranch(
         targetIndex = findReferencedForm(
           data,
           child.formId,
-          form.formSetGuid,
+          child.targetFormSetGuid ?? form.formSetGuid,
         );
         if (targetIndex < 0) {
           status = "broken";

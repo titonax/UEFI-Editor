@@ -109,7 +109,7 @@
 }
 
 .warningIcon {
-  color: var(--mantine-color-orange-5);
+  color: var(--mantine-color-pink-4);
 }
 
 .mutedIcon {
@@ -176,13 +176,20 @@
   opacity: 0.75;
 }
 
+.detachedRow {
+  color: var(--mantine-color-gray-4);
+}
+
 .statusVisible { color: var(--mantine-color-green-4); }
 .statusHidden { color: var(--mantine-color-red-4); }
 .statusConditional { color: var(--mantine-color-orange-4); }
 .statusUnknown { color: var(--mantine-color-gray-4); }
 .statusBroken { color: var(--mantine-color-pink-4); }
+.statusDetached { color: var(--mantine-color-gray-5); }
 
-.statusLabel {
+.statusLabel,
+.reachabilityLabel,
+.hardwareLabel {
   margin-left: 0.45rem;
   padding: 0.05rem 0.3rem;
   border: 1px solid currentColor;
@@ -190,4 +197,12 @@
   font-size: 0.58rem;
   line-height: 1.1;
   opacity: 0.78;
+}
+
+.reachabilityLabel {
+  color: var(--mantine-color-gray-4);
+}
+
+.hardwareLabel {
+  color: var(--mantine-color-yellow-5);
 }

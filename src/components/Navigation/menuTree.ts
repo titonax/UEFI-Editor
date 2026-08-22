@@ -5,6 +5,14 @@ import {
   visibilityLabel,
 } from "../scripts/visibility";
 
+export type ReachabilityStatus =
+  | "root"
+  | "reachable"
+  | "detached"
+  | "broken";
+
+export type RootSource = "amitse" | "hii-formset" | "inferred";
+
 export interface MenuTreeNode {
   key: string;
   label: string;
@@ -16,6 +24,10 @@ export interface MenuTreeNode {
   missing?: boolean;
   status: VisibilityStatus;
   statusLabel: string;
+  reachability: ReachabilityStatus;
+  reachabilityLabel: string;
+  rootSource?: RootSource;
+  hardwareDependent: boolean;
   conditionSummary?: string;
 }
 
@@ -32,15 +44,15 @@ function normalizedFormId(formId: string) {
   return Number.isNaN(parsed) ? formId : String(parsed);
 }
 
-function findFormIndex(
-  data: Data,
-  formId: string,
-  formSetGuid?: string,
-) {
+function sameGuid(left?: string, right?: string) {
+  return (left ?? "").toLowerCase() === (right ?? "").toLowerCase();
+}
+
+function findFormIndex(data: Data, formId: string, formSetGuid?: string) {
   const normalized = normalizedFormId(formId);
   const inFormSet = data.forms.findIndex(
     (form) =>
-      form.formSetGuid === formSetGuid &&
+      sameGuid(form.formSetGuid, formSetGuid) &&
       normalizedFormId(form.formId) === normalized,
   );
 
@@ -51,6 +63,37 @@ function findFormIndex(
   return data.forms.findIndex(
     (form) => normalizedFormId(form.formId) === normalized,
   );
+}
+
+function conditionDescriptions(
+  visibility: ReturnType<typeof childVisibility>,
+) {
+  return visibility.conditions
+    .filter((condition) => condition.active && condition.constant !== false)
+    .map((condition) => {
+      const kind = condition.kind ?? "SuppressIf";
+      return `${kind}: ${condition.expression ?? `condition at ${condition.offset}`}`;
+    });
+}
+
+function inheritedStatusLabel(
+  status: VisibilityStatus,
+  directStatus: VisibilityStatus,
+  directLabel: string,
+) {
+  if (status === directStatus) {
+    return directLabel;
+  }
+
+  if (status === "hidden") {
+    return "Hidden by parent gate";
+  }
+
+  if (status === "conditional") {
+    return "Unavailable by parent gate";
+  }
+
+  return visibilityLabel(status);
 }
 
 export function buildMenuTree(data: Data): MenuTree {
@@ -64,7 +107,15 @@ export function buildMenuTree(data: Data): MenuTree {
     label: string,
     ancestors: Set<number>,
     inheritedStatus: VisibilityStatus,
-    conditionSummary?: string,
+    reachability: ReachabilityStatus,
+    conditionPath: string[] = [],
+    hardwareDependent = false,
+    statusLabel = visibilityLabel(inheritedStatus),
+    reachabilityLabel =
+      reachability === "detached"
+        ? "Detached descendant"
+        : "Reachable from menu",
+    rootSource?: RootSource,
   ): MenuTreeNode {
     const form = data.forms[formIndex];
     const cycle = ancestors.has(formIndex);
@@ -86,14 +137,21 @@ export function buildMenuTree(data: Data): MenuTree {
             }
 
             const reference = child;
+            const targetFormSetGuid =
+              reference.targetFormSetGuid ?? form.formSetGuid;
             const targetIndex = findFormIndex(
               data,
               reference.formId,
-              form.formSetGuid,
+              targetFormSetGuid,
             );
             const childKey = `${key}/ref-${String(childIndex)}-${normalizedFormId(
               reference.formId,
             )}`;
+            const visibility = childVisibility(data, reference);
+            const descriptions = conditionDescriptions(visibility);
+            const nextConditionPath = [...conditionPath, ...descriptions];
+            const nextHardwareDependent =
+              hardwareDependent || visibility.hardwareDependent;
 
             if (targetIndex < 0) {
               return {
@@ -109,12 +167,16 @@ export function buildMenuTree(data: Data): MenuTree {
                 missing: true,
                 status: "broken",
                 statusLabel: visibilityLabel("broken"),
-                conditionSummary: "The Ref target does not exist in the parsed HII graph.",
+                reachability: "broken",
+                reachabilityLabel: "Dangling Ref target",
+                hardwareDependent: nextHardwareDependent,
+                conditionSummary:
+                  nextConditionPath.join("; ") ||
+                  "The Ref target does not exist in the parsed HII graph.",
               };
             }
 
             const target = data.forms[targetIndex];
-            const visibility = childVisibility(data, reference);
             const status = combineVisibility(
               inheritedStatus,
               visibility.status,
@@ -125,10 +187,13 @@ export function buildMenuTree(data: Data): MenuTree {
               reference.name.length > 0 ? reference.name : target.name,
               nextAncestors,
               status,
-              visibility.conditions
-                .map((item) => item.expression)
-                .filter((item): item is string => Boolean(item))
-                .join("; ") || visibility.explanation,
+              reachability === "detached" ? "detached" : "reachable",
+              nextConditionPath,
+              nextHardwareDependent,
+              inheritedStatusLabel(status, visibility.status, visibility.label),
+              reachability === "detached"
+                ? "Detached descendant"
+                : "Reachable through Ref",
             );
           })
           .filter((node): node is MenuTreeNode => node !== null);
@@ -151,36 +216,56 @@ export function buildMenuTree(data: Data): MenuTree {
       children,
       cycle,
       status: inheritedStatus,
-      statusLabel: visibilityLabel(inheritedStatus),
-      conditionSummary,
+      statusLabel,
+      reachability,
+      reachabilityLabel,
+      rootSource,
+      hardwareDependent,
+      conditionSummary:
+        conditionPath.length > 0 ? conditionPath.join("; ") : undefined,
     };
   }
 
-  const roots = data.menu
+  const hasAmitseRoots = data.menu.some(
+    (entry) => entry.source === "amitse" || entry.offset !== null,
+  );
+  const rootEntries = hasAmitseRoots
+    ? data.menu.filter(
+        (entry) => entry.source === "amitse" || entry.offset !== null,
+      )
+    : data.menu;
+
+  const roots = rootEntries
     .map((entry, menuIndex): MenuTreeNode | null => {
-      const formIndex = findFormIndex(
-        data,
-        entry.formId,
-        entry.formSetGuid,
-      );
+      const formIndex = findFormIndex(data, entry.formId, entry.formSetGuid);
+      const rootSource: RootSource =
+        entry.source === "amitse" || entry.offset !== null
+          ? "amitse"
+          : "hii-formset";
+      const reachabilityLabel =
+        rootSource === "amitse" ? "AMITSE menu root" : "HII FormSet entry";
+
       if (formIndex < 0) {
         return {
           key: `root-${String(menuIndex)}-${normalizedFormId(entry.formId)}`,
           label: entry.name || `Missing root ${entry.formId}`,
-          formName: "AMITSE root target was not found",
+          formName: "Menu root target was not found",
           formId: entry.formId,
           formIndex: null,
           children: [],
           missing: true,
           status: "broken",
           statusLabel: visibilityLabel("broken"),
+          reachability: "broken",
+          reachabilityLabel: "Broken root target",
+          rootSource,
+          hardwareDependent: false,
           conditionSummary:
-            "The menu table points to a form that does not exist in the parsed HII graph.",
+            "The menu entry points to a form that does not exist in the parsed HII graph.",
         };
       }
 
       const form = data.forms[formIndex];
-      const confirmed = entry.source === "amitse" || entry.offset !== null;
       return buildFormNode(
         formIndex,
         `root-${String(menuIndex)}-${normalizedFormId(entry.formId)}`,
@@ -188,45 +273,118 @@ export function buildMenuTree(data: Data): MenuTree {
           ? entry.name
           : (form.formSetTitle ?? form.name),
         new Set(),
-        confirmed ? "visible" : "unknown",
-        confirmed
-          ? "Confirmed in the AMITSE menu table."
-          : "FormSet root found in HII, but presence in the visible AMITSE tab list is not confirmed.",
+        "visible",
+        "root",
+        [],
+        false,
+        "No visibility gate",
+        reachabilityLabel,
+        rootSource,
       );
     })
     .filter((node): node is MenuTreeNode => node !== null);
 
   if (roots.length === 0) {
     for (const [formIndex, form] of data.forms.entries()) {
-      if (form.referencedIn.length === 0) {
+      if (form.referencedIn.length === 0 && !reachable.has(formIndex)) {
         roots.push(
           buildFormNode(
             formIndex,
             `root-fallback-${String(formIndex)}`,
             form.formSetTitle ?? form.name,
             new Set(),
-            "unknown",
-            "Fallback root inferred from an unreferenced FormSet.",
+            "visible",
+            "root",
+            [],
+            false,
+            "No visibility gate",
+            "Inferred graph entry",
+            "inferred",
           ),
         );
       }
     }
   }
 
-  const orphans: MenuTreeNode[] = [];
-  for (const [formIndex, form] of data.forms.entries()) {
-    if (!reachable.has(formIndex)) {
-      orphans.push(
-        buildFormNode(
-          formIndex,
-          `orphan-${String(formIndex)}`,
-          form.name,
-          new Set(),
-          "orphaned",
-          "No path from a detected menu root reaches this form.",
-        ),
+  const remaining = new Set(
+    data.forms
+      .map((_, formIndex) => formIndex)
+      .filter((formIndex) => !reachable.has(formIndex)),
+  );
+  const incomingFromRemaining = new Map<number, number>();
+  for (const formIndex of remaining) {
+    incomingFromRemaining.set(formIndex, 0);
+  }
+  for (const formIndex of remaining) {
+    const form = data.forms[formIndex];
+    for (const child of form.children) {
+      if (child.type !== "Ref") {
+        continue;
+      }
+      const targetIndex = findFormIndex(
+        data,
+        child.formId,
+        child.targetFormSetGuid ?? form.formSetGuid,
       );
+      if (remaining.has(targetIndex)) {
+        incomingFromRemaining.set(
+          targetIndex,
+          (incomingFromRemaining.get(targetIndex) ?? 0) + 1,
+        );
+      }
     }
+  }
+
+  const formSetRootIndices = new Set(
+    (
+      data.formSetRoots ??
+      data.menu.filter((entry) => entry.source === "formset")
+    )
+      .map((entry) => findFormIndex(data, entry.formId, entry.formSetGuid))
+      .filter((formIndex) => formIndex >= 0),
+  );
+  const detachedCandidates = [
+    ...[...remaining].filter((formIndex) => formSetRootIndices.has(formIndex)),
+    ...[...remaining].filter(
+      (formIndex) =>
+        !formSetRootIndices.has(formIndex) &&
+        (incomingFromRemaining.get(formIndex) ?? 0) === 0,
+    ),
+  ];
+
+  const orphans: MenuTreeNode[] = [];
+  function addDetachedRoot(formIndex: number, reason: string) {
+    if (reachable.has(formIndex)) {
+      return;
+    }
+    const form = data.forms[formIndex];
+    orphans.push(
+      buildFormNode(
+        formIndex,
+        `detached-${String(formIndex)}`,
+        form.formSetTitle ?? form.name,
+        new Set(),
+        "visible",
+        "detached",
+        [],
+        false,
+        "No visibility gate",
+        reason,
+      ),
+    );
+  }
+
+  for (const formIndex of detachedCandidates) {
+    addDetachedRoot(
+      formIndex,
+      formSetRootIndices.has(formIndex)
+        ? "Detached HII FormSet"
+        : "Unreferenced form",
+    );
+  }
+
+  for (const formIndex of remaining) {
+    addDetachedRoot(formIndex, "Detached cycle or isolated subgraph");
   }
 
   const signature = [
@@ -234,9 +392,13 @@ export function buildMenuTree(data: Data): MenuTree {
     ...orphans.map((node) => node.key),
     ...data.forms.map(
       (form) =>
-        `${form.formSetGuid ?? ""}:${normalizedFormId(form.formId)}:${String(
-          form.children.filter((child) => child.type === "Ref").length,
-        )}`,
+        `${form.formSetGuid ?? ""}:${normalizedFormId(form.formId)}:${form.children
+          .filter((child) => child.type === "Ref")
+          .map(
+            (child) =>
+              `${child.targetFormSetGuid ?? form.formSetGuid ?? ""}:${normalizedFormId(child.formId)}`,
+          )
+          .join(",")}`,
     ),
   ].join("|");
 
