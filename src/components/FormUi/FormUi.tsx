@@ -58,7 +58,7 @@ function ConditionDetails({
         const kind = condition.kind ?? "SuppressIf";
         const runtime = condition.source === "runtime";
         const sourceLabel = runtime
-          ? "Runtime / HW candidate"
+          ? "Runtime / HW source"
           : condition.source === "setup"
             ? "Setup variable"
             : condition.source ?? "unknown";
@@ -66,7 +66,7 @@ function ConditionDetails({
           <div key={condition.offset} className={s.conditionCard}>
             <Group gap={5} justify="space-between" wrap="nowrap">
               <Group gap={5} wrap="wrap">
-                <Badge size="xs" color={runtime ? "orange" : kind === "SuppressIf" ? "red" : "yellow"}>
+                <Badge size="xs" color={kind === "SuppressIf" ? "red" : "orange"}>
                   {kind}
                 </Badge>
                 <Tooltip
@@ -107,7 +107,10 @@ function ConditionDetails({
               {condition.expression ?? `Condition at ${condition.offset}`}
             </Text>
             <Text size="xs" c="dimmed" mt={3}>
-              IFR condition offset: {condition.offset}
+              {kind === "SuppressIf"
+                ? "This expression hides the item when true."
+                : "This expression disables or grays the item when true."}
+              {" "}IFR condition offset: {condition.offset}
             </Text>
             {condition.varStoreNames?.length ? (
               <Text size="xs" c="dimmed" mt={3}>
@@ -219,7 +222,7 @@ const TableRow = React.memo(
           className={type === "Ref" ? s.pointer : undefined}
           onClick={() => {
             if (type === "Ref") {
-              handleRefClick(child.formId);
+              handleRefClick(child.formId, child.targetFormSetGuid);
             }
           }}
         >
@@ -419,7 +422,7 @@ export default function FormUi({
           <Table.Tr>
             <Table.Th>Name</Table.Th>
             <Table.Th>Form Id</Table.Th>
-            <Table.Th>Visibility</Table.Th>
+            <Table.Th>Root evidence</Table.Th>
           </Table.Tr>
         </Table.Thead>
         <Table.Tbody>
@@ -468,7 +471,7 @@ export default function FormUi({
                   label={
                     entry.source === "amitse" || entry.offset !== null
                       ? "This root is present in the AMITSE menu table."
-                      : "This FormSet exists in HII, but its presence in the visible AMITSE tab list is not confirmed."
+                      : "This is the entry form declared by its HII FormSet. It is structural evidence, not a runtime visibility condition."
                   }
                   multiline
                   w={320}
@@ -477,13 +480,13 @@ export default function FormUi({
                     color={
                       entry.source === "amitse" || entry.offset !== null
                         ? "green"
-                        : "gray"
+                        : "blue"
                     }
                     variant="light"
                   >
                     {entry.source === "amitse" || entry.offset !== null
-                      ? "Confirmed"
-                      : "Not confirmed"}
+                      ? "AMITSE menu"
+                      : "HII FormSet entry"}
                   </Badge>
                 </Tooltip>
               </Table.Td>
@@ -511,9 +514,11 @@ export default function FormUi({
   function summaryBadges(counts: Record<VisibilityStatus, number>) {
     return (
       <>
-        <Badge color="green">{counts.visible} visible</Badge>
-        <Badge color="red">{counts.hidden} hidden</Badge>
-        <Badge color="orange">{counts.conditional} conditional</Badge>
+        <Badge color="green">{counts.visible} ungated</Badge>
+        <Badge color="red">{counts.hidden} hidden / affected</Badge>
+        <Badge color="orange">
+          {counts.conditional} unavailable / affected
+        </Badge>
         {counts.orphaned > 0 && (
           <Badge color="red">{counts.orphaned} orphaned</Badge>
         )}
@@ -534,16 +539,28 @@ export default function FormUi({
           <Text size="sm" fw={600}>Selected path:</Text>
           <Tooltip
             label={
-              pageNode.conditionSummary ??
-              "No confirmed path from an AMITSE root was found."
+              pageNode.conditionSummary ?? pageNode.reachabilityLabel
             }
             multiline
             w={420}
           >
-            <Badge color={visibilityColors[pageStatus]} variant="light">
-              {pageNode.statusLabel}
+            <Badge
+              color={pageNode.reachability === "detached" ? "gray" : "blue"}
+              variant="light"
+            >
+              {pageNode.reachabilityLabel}
             </Badge>
           </Tooltip>
+          {(pageStatus === "hidden" || pageStatus === "conditional") && (
+            <Tooltip label={pageNode.conditionSummary} multiline w={420}>
+              <Badge color={visibilityColors[pageStatus]} variant="light">
+                {pageNode.statusLabel}
+              </Badge>
+            </Tooltip>
+          )}
+          {pageNode.hardwareDependent && (
+            <Badge color="yellow" variant="outline">HW/runtime source</Badge>
+          )}
         </Group>
         <Group gap="xs">
           <Text size="sm" fw={600}>This page:</Text>
@@ -564,7 +581,7 @@ export default function FormUi({
         <Table.Tr>
           <Table.Th>Name</Table.Th>
           <Table.Th>Type</Table.Th>
-          <Table.Th>Visibility</Table.Th>
+          <Table.Th>HII effect</Table.Th>
           <Table.Th>Access Level</Table.Th>
           <Table.Th>Failsafe</Table.Th>
           <Table.Th>Optimal</Table.Th>
