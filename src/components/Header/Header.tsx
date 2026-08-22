@@ -25,9 +25,13 @@ export default function Header({
       ? rootPath
       : findNodePath(tree.orphans, currentFormIndex);
   }, [currentFormIndex, tree.orphans, tree.roots]);
+  if (currentFormIndex < 0 || activePath.length === 0) {
+    return null;
+  }
+
   const currentNode = activePath[activePath.length - 1];
   const profile = tree.profiles.find(
-    (candidate) => candidate.id === currentNode?.profileId,
+    (candidate) => candidate.id === currentNode.profileId,
   );
 
   function navigate(formIndex: number | null) {
@@ -39,37 +43,33 @@ export default function Header({
   }
 
   return (
-    <>
-      {currentFormIndex >= 0 && currentNode && (
-        <div className={s.root}>
-          <Group gap="xs">
-            {profile && (
-              <>
-                <div>{profile.label}</div>
-                <div>{">"}</div>
-              </>
-            )}
-            {activePath.map((node, index) => {
-              const last = index === activePath.length - 1;
-              return (
-                <React.Fragment key={node.key}>
-                  <div
-                    className={last ? undefined : s.pointer}
-                    onClick={() => {
-                      if (!last) {
-                        navigate(node.formIndex);
-                      }
-                    }}
-                  >
-                    {node.label}
-                  </div>
-                  {!last && <div>{">"}</div>}
-                </React.Fragment>
-              );
-            })}
-          </Group>
-        </div>
-      )}
-    </>
+    <div className={s.root}>
+      <Group gap="xs">
+        {profile && (
+          <>
+            <div>{profile.label}</div>
+            <div>{">"}</div>
+          </>
+        )}
+        {activePath.map((node, index) => {
+          const last = index === activePath.length - 1;
+          return (
+            <React.Fragment key={node.key}>
+              <div
+                className={last ? undefined : s.pointer}
+                onClick={() => {
+                  if (!last) {
+                    navigate(node.formIndex);
+                  }
+                }}
+              >
+                {node.label}
+              </div>
+              {!last && <div>{">"}</div>}
+            </React.Fragment>
+          );
+        })}
+      </Group>
+    </div>
   );
 }
