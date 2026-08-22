@@ -87,6 +87,10 @@ function decToHexString(decimal: number) {
   return `0x${decimal.toString(16).toUpperCase()}`;
 }
 
+function formReferenceKey(formId: string, formSetGuid?: string) {
+  return `${formSetGuid ?? ""}:${String(parseInt(formId))}`;
+}
+
 function checkSuppressions(scopes: Scopes, formChild: FormChildren) {
   const suppressions = scopes
     .filter((scope) => scope.type === "SuppressIf")
@@ -466,8 +470,14 @@ export async function parseData(files: PopulatedFiles) {
   setupTxt = setupTxt.replace(/[\r\n|\n|\r](?!0x[0-9A-F]{3})/g, "<br>");
 
   const formSetIds = new Set<string>();
+  const formSetMetadata = new Map<
+    string,
+    { guid: string; title: string }
+  >();
   const formSetRoots: Menu = [];
   let pendingFormSetTitle: string | null = null;
+  let currentFormSetGuid: string | undefined;
+  let currentFormSetTitle: string | undefined;
   const varStores: VarStores = [];
   const forms: Forms = [];
   const suppressions: Suppression[] = [];
@@ -523,8 +533,21 @@ export async function parseData(files: PopulatedFiles) {
     const currentScope = scopes[scopes.length - 1];
 
     if (formSet) {
-      formSetIds.add(formSet[4] + formSet[5]);
-      pendingFormSetTitle = formSet[6];
+      const formSetId = formSet[4] + formSet[5];
+      currentFormSetGuid = [
+        formSet[1],
+        formSet[2],
+        formSet[3],
+        formSet[4],
+        formSet[5],
+      ].join("-");
+      currentFormSetTitle = formSet[6];
+      formSetIds.add(formSetId);
+      formSetMetadata.set(formSetId, {
+        guid: currentFormSetGuid,
+        title: currentFormSetTitle,
+      });
+      pendingFormSetTitle = currentFormSetTitle;
     }
 
     if (varStore) {
@@ -541,6 +564,7 @@ export async function parseData(files: PopulatedFiles) {
           name: pendingFormSetTitle,
           formId: form[1],
           offset: null,
+          formSetGuid: currentFormSetGuid,
         });
         pendingFormSetTitle = null;
       }
@@ -549,6 +573,8 @@ export async function parseData(files: PopulatedFiles) {
         name: form[2],
         type: "Form",
         formId: form[1],
+        formSetGuid: currentFormSetGuid,
+        formSetTitle: currentFormSetTitle,
         referencedIn: [],
         children: [],
       };
@@ -592,10 +618,14 @@ export async function parseData(files: PopulatedFiles) {
 
       currentForm.children.push(currentRef);
 
-      if (formId in references) {
-        references[formId].add(currentForm.formId);
+      const referenceKey = formReferenceKey(
+        formId,
+        currentForm.formSetGuid,
+      );
+      if (referenceKey in references) {
+        references[referenceKey].add(currentForm.formId);
       } else {
-        references[formId] = new Set([currentForm.formId]);
+        references[referenceKey] = new Set([currentForm.formId]);
       }
     }
 
@@ -800,20 +830,30 @@ export async function parseData(files: PopulatedFiles) {
       const hexEntry = decToHexString(
         parseInt(match[1].slice(2) + match[1].slice(0, 2), 16),
       );
+      const formSet = formSetMetadata.get(formSetId);
+      const matchedForm =
+        forms.find(
+          (form) =>
+            form.formSetGuid === formSet?.guid &&
+            parseInt(form.formId) === parseInt(hexEntry),
+        ) ??
+        forms.find(
+          (form) => parseInt(form.formId) === parseInt(hexEntry),
+        );
       return {
-        // eslint-disable-next-line @typescript-eslint/no-non-null-assertion, @typescript-eslint/no-non-null-asserted-optional-chain
-        name: forms.find((form) => parseInt(form.formId) === parseInt(hexEntry))
-          ?.name!,
+        name: matchedForm?.name ?? formSet?.title ?? "",
         formId: hexEntry,
         offset: decToHexString((match.index + formSetId.length) / 2),
+        formSetGuid: formSet?.guid,
       };
     })
     .filter((x) => x.name);
   const menu = discoveredMenu.length === 0 ? formSetRoots : discoveredMenu;
 
   for (const form of forms) {
-    if (form.formId in references) {
-      form.referencedIn = [...references[form.formId]];
+    const referenceKey = formReferenceKey(form.formId, form.formSetGuid);
+    if (referenceKey in references) {
+      form.referencedIn = [...references[referenceKey]];
     }
   }
 

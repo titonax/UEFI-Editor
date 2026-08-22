@@ -28,7 +28,7 @@ createRoot(document.getElementById("root")!).render(
     <MantineProvider theme={theme} defaultColorScheme="dark">
       <AppShell
         navbar={{
-          width: { base: 100, xs: 140, sm: 180, md: 220, lg: 260, xl: 300 },
+          width: { base: 220, xs: 240, sm: 280, md: 320, lg: 360 },
           breakpoint: 0,
         }}
         header={{
