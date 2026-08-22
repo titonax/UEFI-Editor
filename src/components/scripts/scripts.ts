@@ -18,7 +18,7 @@ import type {
   VarStores,
 } from "./types";
 
-export const version = "0.2.0";
+export const version = "0.3.0";
 const wantedIFRExtractorVersions = ["1.6.1"];
 
 async function sha256Hex(data: BufferSource) {
@@ -723,9 +723,15 @@ export async function parseData(files: PopulatedFiles) {
       line,
     );
     const ref =
-      /Ref Prompt: "(.*)", Help: "(.*)", QuestionFlags: (.*), QuestionId: (.*), VarStoreId: (.*), VarStoreInfo: (.*), FormId: (.*) \{ (.*) \}/.exec(
+      /Ref Prompt: "(.*)", Help: "(.*)", QuestionFlags: ([^,]*), QuestionId: ([^,]*), VarStoreId: ([^,]*), VarStoreInfo: ([^,{]*)(.*?) \{ ([0-9A-F ]+) \}/.exec(
         line,
       );
+    const refFormId = ref
+      ? /(?:^|, )FormId: ([^, {]+)/.exec(ref[7])
+      : null;
+    const refFormSetGuid = ref
+      ? /(?:^|, )FormSetGuid: ([^, {]+)/.exec(ref[7])
+      : null;
     const string =
       /String Prompt: "(.*)", Help: "(.*)", QuestionFlags: (.*), QuestionId: (.*), VarStoreId: (.*), VarStoreInfo: (.*), MinSize: (.*), MaxSize: (.*), Flags: (.*) \{ (.*) \}/.exec(
         line,
@@ -825,8 +831,9 @@ export async function parseData(files: PopulatedFiles) {
       } as Suppression);
     }
 
-    if (ref) {
-      const formId = ref[7];
+    if (ref && refFormId) {
+      const formId = refFormId[1];
+      const targetFormSetGuid = refFormSetGuid?.[1];
 
       const currentRef: RefPrompt = {
         name: ref[1],
@@ -840,6 +847,7 @@ export async function parseData(files: PopulatedFiles) {
           currentFormSetGuid,
         ),
         formId,
+        targetFormSetGuid,
         ...getAdditionalData(ref[8], setupdataBin, true),
       };
 
@@ -849,7 +857,7 @@ export async function parseData(files: PopulatedFiles) {
 
       const referenceKey = formReferenceKey(
         formId,
-        currentForm.formSetGuid,
+        targetFormSetGuid ?? currentForm.formSetGuid,
       );
       if (referenceKey in references) {
         references[referenceKey].add(currentForm.formId);
@@ -1102,6 +1110,7 @@ export async function parseData(files: PopulatedFiles) {
       ? "aptio-iv"
       : "aptio-v",
     menu,
+    formSetRoots,
     forms,
     varStores,
     suppressions,
