@@ -186,10 +186,13 @@
 .statusUnknown { color: var(--mantine-color-gray-4); }
 .statusBroken { color: var(--mantine-color-pink-4); }
 .statusDetached { color: var(--mantine-color-gray-5); }
+.statusProfileFallback { color: var(--mantine-color-orange-4); }
 
 .statusLabel,
 .reachabilityLabel,
-.hardwareLabel {
+.hardwareLabel,
+.accessLabel,
+.uiStateLabel {
   margin-left: 0.45rem;
   padding: 0.05rem 0.3rem;
   border: 1px solid currentColor;
@@ -205,4 +208,47 @@
 
 .hardwareLabel {
   color: var(--mantine-color-yellow-5);
+}
+
+.accessLabel {
+  color: var(--mantine-color-violet-4);
+}
+
+.uiStateLabel {
+  color: var(--mantine-color-cyan-4);
+}
+
+.profileLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  margin: 0.65rem 0.35rem 0.25rem;
+  padding: 0.45rem 0.35rem 0.3rem;
+  border-top: 1px solid var(--mantine-color-dark-5);
+  color: var(--mantine-color-dark-1);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.025em;
+  text-transform: uppercase;
+}
+
+.profileLive,
+.profileFallback,
+.profileUnresolved {
+  font-size: 0.58rem;
+  font-weight: 600;
+  text-transform: none;
+}
+
+.profileLive {
+  color: var(--mantine-color-green-4);
+}
+
+.profileFallback {
+  color: var(--mantine-color-orange-4);
+}
+
+.profileUnresolved {
+  color: var(--mantine-color-gray-4);
 }
