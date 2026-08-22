@@ -6,7 +6,7 @@ import { IconSearch } from "@tabler/icons-react";
 
 interface SearchUiProps {
   data: Data;
-  handleRefClick: (formId: string) => void;
+  handleRefClick: (formId: string, formSetGuid?: string) => void;
   search: string;
   setSearch: (newValue: string) => void;
 }
@@ -22,6 +22,8 @@ export default function SearchUi({
   const found: {
     type: string;
     formId: string;
+    formSetGuid?: string;
+    formSetTitle?: string;
     formName: string;
     name: string;
   }[] = [];
@@ -32,6 +34,8 @@ export default function SearchUi({
         found.push({
           type: "Form",
           formId: form.formId,
+          formSetGuid: form.formSetGuid,
+          formSetTitle: form.formSetTitle,
           formName: form.name,
           name: form.name,
         });
@@ -42,6 +46,8 @@ export default function SearchUi({
           found.push({
             type: setting.type,
             formId: form.formId,
+            formSetGuid: form.formSetGuid,
+            formSetTitle: form.formSetTitle,
             formName: form.name,
             name: setting.name,
           });
@@ -67,6 +73,7 @@ export default function SearchUi({
           <Table.Tr>
             <Table.Th>Name</Table.Th>
             <Table.Th>Type</Table.Th>
+            <Table.Th>FormSet</Table.Th>
             <Table.Th>Form Name</Table.Th>
             <Table.Th>Form Id</Table.Th>
           </Table.Tr>
@@ -78,10 +85,11 @@ export default function SearchUi({
             >
               <Table.Td>{entry.name}</Table.Td>
               <Table.Td>{entry.type}</Table.Td>
+              <Table.Td>{entry.formSetTitle}</Table.Td>
               <Table.Td
                 className={s.pointer}
                 onClick={() => {
-                  handleRefClick(entry.formId);
+                  handleRefClick(entry.formId, entry.formSetGuid);
                 }}
               >
                 {entry.formName}

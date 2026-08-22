@@ -25,6 +25,7 @@ export type Menu = {
   name: string;
   formId: string;
   offset: string | null;
+  formSetGuid?: string;
 }[];
 
 export type Forms = Form[];
@@ -33,6 +34,8 @@ export interface Form {
   name: string;
   type: "Form";
   formId: string;
+  formSetGuid?: string;
+  formSetTitle?: string;
   referencedIn: string[];
   children: FormChildren[];
 }

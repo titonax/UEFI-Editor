@@ -52,7 +52,7 @@ function SuppressionChip({
 interface TableRowProps {
   child: FormChildren;
   index: number;
-  handleRefClick: (formId: string) => void;
+  handleRefClick: (formId: string, formSetGuid?: string) => void;
   data: Data;
   setData: Updater<Data>;
   currentFormIndex: number;
@@ -292,10 +292,23 @@ export default function FormUi({
 }: FormUiProps) {
   const [search, setSearch] = useDebouncedState("", 200);
 
-  function handleRefClick(formId: string) {
-    const formIndex = data.forms.findIndex(
-      (form) => parseInt(form.formId) === parseInt(formId)
+  function handleRefClick(formId: string, formSetGuid?: string) {
+    const sourceFormSetGuid =
+      formSetGuid ??
+      (currentFormIndex >= 0
+        ? data.forms[currentFormIndex].formSetGuid
+        : undefined);
+    let formIndex = data.forms.findIndex(
+      (form) =>
+        form.formSetGuid === sourceFormSetGuid &&
+        parseInt(form.formId) === parseInt(formId),
     );
+
+    if (formIndex < 0) {
+      formIndex = data.forms.findIndex(
+        (form) => parseInt(form.formId) === parseInt(formId),
+      );
+    }
 
     if (formIndex >= 0) {
       setCurrentFormIndex(formIndex);
@@ -332,7 +345,7 @@ export default function FormUi({
               <Table.Td
                 className={s.pointer}
                 onClick={() => {
-                  handleRefClick(entry.formId);
+                  handleRefClick(entry.formId, entry.formSetGuid);
                 }}
               >
                 {entry.name}
@@ -342,7 +355,13 @@ export default function FormUi({
                   className={s.formIdChildWidth}
                   disabled={entry.offset === null}
                   value={entry.formId}
-                  data={data.forms.map((form) => form.formId)}
+                  data={data.forms
+                    .filter(
+                      (form) =>
+                        !entry.formSetGuid ||
+                        form.formSetGuid === entry.formSetGuid,
+                    )
+                    .map((form) => form.formId)}
                   onChange={(ev) => {
                     const value = ev.target.value;
 
@@ -350,7 +369,10 @@ export default function FormUi({
                       draft.menu[index].formId = value;
                       // eslint-disable-next-line @typescript-eslint/no-non-null-assertion, @typescript-eslint/no-non-null-asserted-optional-chain
                       draft.menu[index].name = data.forms.find(
-                        (form) => parseInt(form.formId) === parseInt(value)
+                        (form) =>
+                          (!entry.formSetGuid ||
+                            form.formSetGuid === entry.formSetGuid) &&
+                          parseInt(form.formId) === parseInt(value),
                       )?.name!;
                     });
                   }}
