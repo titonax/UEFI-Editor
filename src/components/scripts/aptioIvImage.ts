@@ -5,6 +5,7 @@ export interface AptioIvImageReport {
   setupFfs: number[];
   amitseFfs: number[];
   nestedFirmwareCandidate: boolean;
+  deepScanRequired: boolean;
   aptioIvCandidate: boolean;
 }
 
@@ -86,6 +87,8 @@ export async function inspectAptioIvImage(
     setupFfs.length === 0 &&
     amitseFfs.length === 0 &&
     hasAmiNvramMarkers;
+  const deepScanRequired =
+    firmwareVolumes.length !== 0 && setupFfs.length === 0;
   const intelDescriptor =
     bytes.length >= 0x14 &&
     bytesToHex(bytes.slice(0x10, 0x14)) === intelDescriptorSignature;
@@ -97,6 +100,7 @@ export async function inspectAptioIvImage(
     setupFfs,
     amitseFfs,
     nestedFirmwareCandidate,
+    deepScanRequired,
     aptioIvCandidate:
       firmwareVolumes.length !== 0 &&
       (setupFfs.length !== 0 || hasAmiNvramMarkers),
