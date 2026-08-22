@@ -37,8 +37,8 @@ export default function BiosImageUpload({ onExtracted }: BiosImageUploadProps) {
       <FileInput
         leftSection={<IconUpload />}
         size="lg"
-        placeholder="Complete BIOS dump (.bin/.rom)"
-        accept=".bin,.rom"
+        placeholder="Complete BIOS image (.bin/.rom/.u1l)"
+        accept=".bin,.rom,.u1l"
         value={file}
         disabled={loading}
         onChange={(selected) => {
