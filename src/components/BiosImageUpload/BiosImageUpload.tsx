@@ -51,7 +51,12 @@ export default function BiosImageUpload({ onExtracted }: BiosImageUploadProps) {
             void inspectAptioIvImage(selected)
               .then(async (imageReport) => {
                 setReport(imageReport);
-                if (!imageReport.aptioIvCandidate) return;
+                if (
+                  !imageReport.aptioIvCandidate &&
+                  !imageReport.deepScanRequired
+                ) {
+                  return;
+                }
                 setStage("Decompressing nested volumes and locating Setup…");
                 const artifacts = await extractAptioIvArtifacts(selected);
                 setStage("Decoding IFR and building the menu tree…");
@@ -103,12 +108,22 @@ export default function BiosImageUpload({ onExtracted }: BiosImageUploadProps) {
       {error && <Alert color="red" title="Aptio IV extraction failed">{error}</Alert>}
       {report && (
         <>
-          <Alert color={report.aptioIvCandidate ? "green" : "yellow"}>
+          <Alert
+            color={
+              report.aptioIvCandidate
+                ? "green"
+                : report.deepScanRequired
+                  ? "blue"
+                  : "yellow"
+            }
+          >
             {report.aptioIvCandidate
               ? report.nestedFirmwareCandidate
                 ? "AMI Aptio IV candidate: Setup is inside a compressed nested volume. Recursive extraction is required."
                 : "AMI Aptio IV candidate: Setup FFS was found. Automatic IFR extraction is available."
-              : "The required Aptio IV structures were not found. No changes can be generated for this image."}
+              : report.deepScanRequired
+                ? "UEFI image recognized: Setup is not directly visible. Recursive decompression and module discovery will be attempted."
+                : "No valid UEFI firmware volumes were found. No changes can be generated for this image."}
           </Alert>
           <Table striped withColumnBorders>
             <Table.Tbody>
