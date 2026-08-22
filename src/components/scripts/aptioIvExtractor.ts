@@ -7,11 +7,15 @@ import {
 } from "@bjorn3/browser_wasi_shim";
 
 const setupGuid = "899407D7-99FE-43D8-9A21-79EC328CAC21";
+const amitseGuid = "B1DA0ADF-4F77-4070-A88E-BFFE1C60529A";
 const hiiGuid = "97E409E6-4CC1-11D9-81F6-000000000000";
+const setupDataGuid = "FE612B72-203C-47B1-8560-A66D946EB371";
 
 export interface AptioIvArtifacts {
   hii: Uint8Array;
   ifrText: string;
+  amitse?: Uint8Array;
+  setupData?: Uint8Array;
   formPackageCount: number;
   extractionDepth: number;
 }
@@ -218,16 +222,16 @@ async function nestedBuffers(bytes: Uint8Array) {
   return nested;
 }
 
-async function locateSetup(bytes: Uint8Array) {
+async function locateFirmwareFile(bytes: Uint8Array, wantedGuid: string) {
   const queue = [{ bytes, depth: 0 }];
   for (let index = 0; index < queue.length && index < 64; index++) {
     const current = queue[index];
-    const found = findFile(current.bytes, setupGuid, current.depth);
+    const found = findFile(current.bytes, wantedGuid, current.depth);
     if (found) return found;
     const children = await nestedBuffers(current.bytes);
     queue.push(...children.map((child) => ({ bytes: child, depth: current.depth + 1 })));
   }
-  throw new Error("Setup FFS was not found after recursive decompression.");
+  return null;
 }
 
 async function locateHii(file: LocatedFile): Promise<Uint8Array | null> {
@@ -252,6 +256,80 @@ async function locateHii(file: LocatedFile): Promise<Uint8Array | null> {
     }
     if (type === 0x18 && size >= 20 && guid(file.bytes, section + 4) === hiiGuid) {
       return file.bytes.slice(section + 20, section + size);
+    }
+    section = align(section + size, 4);
+  }
+  return null;
+}
+
+async function locateFreeformSection(
+  file: LocatedFile,
+  wantedGuid: string,
+): Promise<Uint8Array | null> {
+  let section = file.bodyStart;
+  while (section + 4 <= file.end) {
+    const size = u24(file.bytes, section);
+    const type = file.bytes[section + 3];
+    if (size < 4 || section + size > file.end) break;
+    if (type === 0x01 && size >= 9) {
+      const compressionType = file.bytes[section + 8];
+      const body = file.bytes.slice(section + 9, section + size);
+      const nested =
+        compressionType === 0
+          ? body
+          : await firmwareDecompress(
+              body,
+              compressionType === 2 ? "lzma" : "standard",
+            );
+      const result = await locateFreeformSection(
+        {
+          bytes: nested,
+          bodyStart: 0,
+          end: nested.length,
+          depth: file.depth,
+        },
+        wantedGuid,
+      );
+      if (result) return result;
+    }
+    if (
+      type === 0x18 &&
+      size >= 20 &&
+      guid(file.bytes, section + 4) === wantedGuid
+    ) {
+      return file.bytes.slice(section + 20, section + size);
+    }
+    section = align(section + size, 4);
+  }
+  return null;
+}
+
+async function locatePe32(file: LocatedFile): Promise<Uint8Array | null> {
+  let section = file.bodyStart;
+  while (section + 4 <= file.end) {
+    const size = u24(file.bytes, section);
+    const type = file.bytes[section + 3];
+    if (size < 4 || section + size > file.end) break;
+    if (type === 0x01 && size >= 9) {
+      const compressionType = file.bytes[section + 8];
+      const body = file.bytes.slice(section + 9, section + size);
+      const nested =
+        compressionType === 0
+          ? body
+          : await firmwareDecompress(
+              body,
+              compressionType === 2 ? "lzma" : "standard",
+            );
+      const result = await locatePe32({
+        bytes: nested,
+        bodyStart: 0,
+        end: nested.length,
+        depth: file.depth,
+      });
+      if (result) return result;
+    }
+    if (type === 0x10) {
+      return file.bytes.slice(section + 4, section + size);
     }
     section = align(section + size, 4);
   }
@@ -288,10 +366,27 @@ async function runIfrExtractor(hii: Uint8Array) {
 
 export async function extractAptioIvArtifacts(file: File): Promise<AptioIvArtifacts> {
   const image = new Uint8Array(await file.arrayBuffer());
-  const setup = await locateSetup(image);
+  const setup = await locateFirmwareFile(image, setupGuid);
+  if (!setup) {
+    throw new Error("Setup FFS was not found after recursive decompression.");
+  }
   const hii = await locateHii(setup);
   if (!hii) throw new Error("The Setup HII package was not found.");
+  const amitseFile = await locateFirmwareFile(image, amitseGuid);
+  const [amitse, setupData] = amitseFile
+    ? await Promise.all([
+        locatePe32(amitseFile),
+        locateFreeformSection(amitseFile, setupDataGuid),
+      ])
+    : [null, null];
   const ifrText = await runIfrExtractor(hii);
   const formPackageCount = (ifrText.match(/FormSet Guid:/g) ?? []).length;
-  return { hii, ifrText, formPackageCount, extractionDepth: setup.depth };
+  return {
+    hii,
+    ifrText,
+    amitse: amitse ?? undefined,
+    setupData: setupData ?? undefined,
+    formPackageCount,
+    extractionDepth: setup.depth,
+  };
 }
