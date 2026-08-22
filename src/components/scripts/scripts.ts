@@ -147,17 +147,24 @@ function discoverSetupDataMenu(formSetRoots: Menu, setupData: string): Menu {
   candidates.sort((left, right) => left.start - right.start);
   const runs: (typeof candidates)[] = [];
   for (const candidate of candidates) {
+    if (runs.length === 0) {
+      runs.push([candidate]);
+      continue;
+    }
     const current = runs[runs.length - 1];
-    const previous = current?.[current.length - 1];
-    if (previous && candidate.start === previous.start + 40) {
+    const previous = current[current.length - 1];
+    if (candidate.start === previous.start + 40) {
       current.push(candidate);
     } else {
       runs.push([candidate]);
     }
   }
 
+  if (runs.length === 0) {
+    return [];
+  }
   const pageList = runs.sort((left, right) => right.length - left.length)[0];
-  if (!pageList || pageList.length < 3) {
+  if (pageList.length < 3) {
     return [];
   }
 
