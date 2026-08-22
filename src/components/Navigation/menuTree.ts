@@ -11,7 +11,20 @@ export type ReachabilityStatus =
   | "detached"
   | "broken";
 
-export type RootSource = "amitse" | "hii-formset" | "inferred";
+export type RootSource =
+  | "amitse"
+  | "setupdata"
+  | "hii-formset"
+  | "inferred";
+
+export interface MenuProfile {
+  id: string;
+  label: string;
+  assessment: "probable-live" | "probable-fallback" | "unresolved";
+  confidence: "high" | "medium" | "low";
+  evidence: string[];
+  roots: MenuTreeNode[];
+}
 
 export interface MenuTreeNode {
   key: string;
@@ -28,11 +41,21 @@ export interface MenuTreeNode {
   reachabilityLabel: string;
   rootSource?: RootSource;
   hardwareDependent: boolean;
+  accessDependent: boolean;
+  uiStateDependent: boolean;
+  pageMask?: string;
+  profileId?: string;
+  profileLabel?: string;
+  profileAssessment?: MenuProfile["assessment"];
+  incomingReferenceCount: number;
+  outgoingReferenceCount: number;
+  parentageLabel: string;
   conditionSummary?: string;
 }
 
 export interface MenuTree {
   roots: MenuTreeNode[];
+  profiles: MenuProfile[];
   orphans: MenuTreeNode[];
   expandableKeys: string[];
   firstKeyByFormIndex: Map<number, string>;
@@ -96,6 +119,123 @@ function inheritedStatusLabel(
   return visibilityLabel(status);
 }
 
+function canonicalMenuRole(label: string) {
+  const normalized = label.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  if (normalized.includes("advanced")) return "advanced";
+  if (normalized.includes("security")) return "security";
+  if (normalized.includes("boot")) return "boot";
+  if (normalized.includes("chipset")) return "chipset";
+  if (normalized.includes("sysinfo") || normalized.includes("system info")) {
+    return "sysinfo";
+  }
+  if (normalized.includes("main")) return "main";
+  if (normalized.includes("exit")) return "exit";
+  return normalized;
+}
+
+function inferMenuProfiles(roots: MenuTreeNode[]): MenuProfile[] {
+  if (roots.length === 0) {
+    return [];
+  }
+
+  const groups: MenuTreeNode[][] = [];
+  let current: MenuTreeNode[] = [];
+  let seenRoles = new Set<string>();
+  let previousRole = "";
+
+  for (const root of roots) {
+    const role = canonicalMenuRole(root.label);
+    const startsAfterExit =
+      previousRole === "exit" && (role === "main" || role === "sysinfo");
+    const restartsKnownSequence =
+      current.length >= 3 &&
+      seenRoles.has(role) &&
+      ["advanced", "security", "boot"].includes(role);
+    if (current.length > 0 && (startsAfterExit || restartsKnownSequence)) {
+      groups.push(current);
+      current = [];
+      seenRoles = new Set<string>();
+    }
+    current.push(root);
+    seenRoles.add(role);
+    previousRole = role;
+  }
+  groups.push(current);
+
+  const hasGenericGroup = groups.some((group) => {
+    const roles = new Set(group.map((root) => canonicalMenuRole(root.label)));
+    return roles.has("main") && roles.has("chipset") && roles.has("exit");
+  });
+  const hasSetupDataEvidence = roots.every(
+    (root) => root.rootSource === "setupdata" && root.pageMask !== undefined,
+  );
+
+  return groups.map((group, index) => {
+    const roles = new Set(group.map((root) => canonicalMenuRole(root.label)));
+    const rawLabels = group.map((root) => root.label.toLowerCase());
+    const generic =
+      roles.has("main") &&
+      roles.has("chipset") &&
+      rawLabels.some((label) => label.includes("save") && label.includes("exit"));
+    const oem = roles.has("sysinfo") && hasGenericGroup && groups.length > 1;
+    const assessment: MenuProfile["assessment"] = oem
+      ? "probable-live"
+      : generic && groups.length > 1
+        ? "probable-fallback"
+        : "unresolved";
+    const label = oem
+      ? "OEM menu profile · probable live"
+      : generic && groups.length > 1
+        ? "AMI full profile · probable fallback"
+        : groups.length > 1
+          ? `Alternate menu profile ${String(index + 1)}`
+          : "Menu profile";
+    const evidence = [
+      hasSetupDataEvidence
+        ? `${String(group.length)} contiguous pages are registered in the AMITSE SetupData page list.`
+        : `${String(group.length)} HII entry forms occur as a coherent menu sequence.`,
+    ];
+    if (generic) {
+      evidence.push(
+        "The Main/Advanced/Chipset/Boot/Security/Save & Exit sequence matches the standard full AMI layout.",
+      );
+    }
+    if (oem) {
+      evidence.push(
+        "The SysInfo/Advanced/Security/Boot/Exit sequence restarts the major tabs and uses vendor-oriented pages, indicating an alternate OEM layout.",
+      );
+    }
+    if (assessment !== "unresolved") {
+      evidence.push(
+        "Profile membership is proven by SetupData; probable live/fallback status is inferred from the menu roles because runtime profile selection is not an IFR relationship.",
+      );
+    }
+    const profile: MenuProfile = {
+      id: `profile-${String(index + 1)}`,
+      label,
+      assessment,
+      confidence:
+        assessment === "unresolved" && hasSetupDataEvidence
+          ? "high"
+          : "medium",
+      evidence,
+      roots: group,
+    };
+    function assignProfile(node: MenuTreeNode) {
+      node.profileId = profile.id;
+      node.profileLabel = profile.label;
+      node.profileAssessment = profile.assessment;
+      for (const child of node.children) {
+        assignProfile(child);
+      }
+    }
+    for (const root of group) {
+      assignProfile(root);
+    }
+    return profile;
+  });
+}
+
 export function buildMenuTree(data: Data): MenuTree {
   const reachable = new Set<number>();
   const expandableKeys: string[] = [];
@@ -110,12 +250,16 @@ export function buildMenuTree(data: Data): MenuTree {
     reachability: ReachabilityStatus,
     conditionPath: string[] = [],
     hardwareDependent = false,
+    accessDependent = false,
+    uiStateDependent = false,
     statusLabel = visibilityLabel(inheritedStatus),
     reachabilityLabel =
       reachability === "detached"
         ? "Detached descendant"
         : "Reachable from menu",
     rootSource?: RootSource,
+    pageMask?: string,
+    parentageLabel = "No incoming IFR reference was found.",
   ): MenuTreeNode {
     const form = data.forms[formIndex];
     const cycle = ancestors.has(formIndex);
@@ -152,6 +296,10 @@ export function buildMenuTree(data: Data): MenuTree {
             const nextConditionPath = [...conditionPath, ...descriptions];
             const nextHardwareDependent =
               hardwareDependent || visibility.hardwareDependent;
+            const nextAccessDependent =
+              accessDependent || visibility.accessDependent;
+            const nextUiStateDependent =
+              uiStateDependent || visibility.uiStateDependent;
 
             if (targetIndex < 0) {
               return {
@@ -170,6 +318,11 @@ export function buildMenuTree(data: Data): MenuTree {
                 reachability: "broken",
                 reachabilityLabel: "Dangling Ref target",
                 hardwareDependent: nextHardwareDependent,
+                accessDependent: nextAccessDependent,
+                uiStateDependent: nextUiStateDependent,
+                incomingReferenceCount: 1,
+                outgoingReferenceCount: 0,
+                parentageLabel: `Referenced by ${form.name || form.formId}, but the target does not exist.`,
                 conditionSummary:
                   nextConditionPath.join("; ") ||
                   "The Ref target does not exist in the parsed HII graph.",
@@ -190,10 +343,15 @@ export function buildMenuTree(data: Data): MenuTree {
               reachability === "detached" ? "detached" : "reachable",
               nextConditionPath,
               nextHardwareDependent,
+              nextAccessDependent,
+              nextUiStateDependent,
               inheritedStatusLabel(status, visibility.status, visibility.label),
               reachability === "detached"
                 ? "Detached descendant"
                 : "Reachable through Ref",
+              undefined,
+              undefined,
+              `Referenced by ${form.name || form.formId} through an IFR Ref opcode.`,
             );
           })
           .filter((node): node is MenuTreeNode => node !== null);
@@ -221,17 +379,31 @@ export function buildMenuTree(data: Data): MenuTree {
       reachabilityLabel,
       rootSource,
       hardwareDependent,
+      accessDependent,
+      uiStateDependent,
+      pageMask,
+      incomingReferenceCount: form.referencedIn.length,
+      outgoingReferenceCount: form.children.filter(
+        (child) => child.type === "Ref",
+      ).length,
+      parentageLabel,
       conditionSummary:
         conditionPath.length > 0 ? conditionPath.join("; ") : undefined,
     };
   }
 
   const hasAmitseRoots = data.menu.some(
-    (entry) => entry.source === "amitse" || entry.offset !== null,
+    (entry) =>
+      entry.source === "setupdata" ||
+      entry.source === "amitse" ||
+      entry.offset !== null,
   );
   const rootEntries = hasAmitseRoots
     ? data.menu.filter(
-        (entry) => entry.source === "amitse" || entry.offset !== null,
+        (entry) =>
+          entry.source === "setupdata" ||
+          entry.source === "amitse" ||
+          entry.offset !== null,
       )
     : data.menu;
 
@@ -239,11 +411,17 @@ export function buildMenuTree(data: Data): MenuTree {
     .map((entry, menuIndex): MenuTreeNode | null => {
       const formIndex = findFormIndex(data, entry.formId, entry.formSetGuid);
       const rootSource: RootSource =
-        entry.source === "amitse" || entry.offset !== null
-          ? "amitse"
-          : "hii-formset";
+        entry.source === "setupdata"
+          ? "setupdata"
+          : entry.source === "amitse" || entry.offset !== null
+            ? "amitse"
+            : "hii-formset";
       const reachabilityLabel =
-        rootSource === "amitse" ? "AMITSE menu root" : "HII FormSet entry";
+        rootSource === "setupdata"
+          ? "AMITSE SetupData page"
+          : rootSource === "amitse"
+            ? "AMITSE executable root"
+            : "HII FormSet entry";
 
       if (formIndex < 0) {
         return {
@@ -260,6 +438,12 @@ export function buildMenuTree(data: Data): MenuTree {
           reachabilityLabel: "Broken root target",
           rootSource,
           hardwareDependent: false,
+          accessDependent: false,
+          uiStateDependent: false,
+          pageMask: entry.pageMask,
+          incomingReferenceCount: 0,
+          outgoingReferenceCount: 0,
+          parentageLabel: "The registered menu root target is missing.",
           conditionSummary:
             "The menu entry points to a form that does not exist in the parsed HII graph.",
         };
@@ -277,9 +461,15 @@ export function buildMenuTree(data: Data): MenuTree {
         "root",
         [],
         false,
+        false,
+        false,
         "No visibility gate",
         reachabilityLabel,
         rootSource,
+        entry.pageMask,
+        rootSource === "setupdata"
+          ? `Registered as a top-level AMITSE SetupData page${entry.pageMask ? ` with mask ${entry.pageMask}` : ""}. It has ${String(form.referencedIn.length)} incoming and ${String(form.children.filter((child) => child.type === "Ref").length)} outgoing IFR Ref(s); its parent is the AMITSE menu profile, not another HII form.`
+          : "Registered as a top-level menu entry; it does not require an IFR Ref parent.",
       );
     })
     .filter((node): node is MenuTreeNode => node !== null);
@@ -297,14 +487,20 @@ export function buildMenuTree(data: Data): MenuTree {
             "root",
             [],
             false,
+            false,
+            false,
             "No visibility gate",
             "Inferred graph entry",
             "inferred",
+            undefined,
+            "Inferred as a root because no incoming IFR Ref was found.",
           ),
         );
       }
     }
   }
+
+  const profiles = inferMenuProfiles(roots);
 
   const remaining = new Set(
     data.forms
@@ -368,7 +564,12 @@ export function buildMenuTree(data: Data): MenuTree {
         "detached",
         [],
         false,
+        false,
+        false,
         "No visibility gate",
+        reason,
+        undefined,
+        undefined,
         reason,
       ),
     );
@@ -404,6 +605,7 @@ export function buildMenuTree(data: Data): MenuTree {
 
   return {
     roots,
+    profiles,
     orphans,
     expandableKeys,
     firstKeyByFormIndex,
