@@ -95,7 +95,7 @@ export default function Navigation({
       node.label === node.formName
         ? `${node.formName} (${node.formId})`
         : `${node.label} — ${node.formName} (${node.formId})`;
-    const statusClass = {
+    const gateClass = {
       visible: s.statusVisible,
       hidden: s.statusHidden,
       conditional: s.statusConditional,
@@ -103,7 +103,9 @@ export default function Navigation({
       orphaned: s.statusHidden,
       broken: s.statusBroken,
     }[node.status];
-    const semanticTitle = `${title}\n${node.statusLabel}${
+    const iconClass =
+      node.reachability === "detached" ? s.statusDetached : gateClass;
+    const semanticTitle = `${title}\n${node.reachabilityLabel}\n${node.statusLabel}${
       node.conditionSummary ? `: ${node.conditionSummary}` : ""
     }`;
 
@@ -123,7 +125,7 @@ export default function Navigation({
             s.treeRow,
             active ? s.selected : "",
             node.missing ? s.missing : "",
-            statusClass,
+            node.reachability === "detached" ? s.detachedRow : "",
           ]
             .filter(Boolean)
             .join(" ")}
@@ -155,12 +157,21 @@ export default function Navigation({
             <IconRefresh size={16} className={s.mutedIcon} />
           ) : hasChildren ? (
             opened ? (
-              <IconFolderOpen size={17} className={s.folderIcon} />
+              <IconFolderOpen
+                size={17}
+                className={`${s.folderIcon} ${iconClass}`}
+              />
             ) : (
-              <IconFolder size={17} className={s.folderIcon} />
+              <IconFolder
+                size={17}
+                className={`${s.folderIcon} ${iconClass}`}
+              />
             )
           ) : (
-            <IconFileDescription size={16} className={s.formIcon} />
+            <IconFileDescription
+              size={16}
+              className={`${s.formIcon} ${iconClass}`}
+            />
           )}
 
           <button
@@ -180,7 +191,22 @@ export default function Navigation({
           >
             <span className={s.nodeName}>{node.label}</span>
             <span className={s.formId}>{node.formId}</span>
-            <span className={s.statusLabel}>{node.statusLabel}</span>
+            {(node.reachability === "root" ||
+              (node.reachability === "detached" && depth === 0) ||
+              node.reachability === "broken") && (
+              <span className={s.reachabilityLabel}>
+                {node.reachabilityLabel}
+              </span>
+            )}
+            {(node.status === "hidden" ||
+              node.status === "conditional") && (
+              <span className={`${s.statusLabel} ${gateClass}`}>
+                {node.statusLabel}
+              </span>
+            )}
+            {node.hardwareDependent && (
+              <span className={s.hardwareLabel}>HW/runtime</span>
+            )}
           </button>
         </div>
 
@@ -266,7 +292,9 @@ export default function Navigation({
 
           {tree.orphans.length > 0 && (
             <>
-              <div className={s.sectionLabel}>Unlinked forms</div>
+              <div className={s.sectionLabel}>
+                Detached / unreferenced components
+              </div>
               {tree.orphans.map((node) => renderNode(node, 0))}
             </>
           )}
